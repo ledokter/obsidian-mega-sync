@@ -272,7 +272,7 @@ export class MegaSyncPlugin extends Plugin {
     const min = this.settings.syncIntervalMinutes;
     if (min && min > 0) {
       this.intervalId = window.setInterval(
-        () => this.startSync(true).catch(() => {}),
+        () => { void this.startSync(true); },
         min * 60 * 1000,
       );
     }

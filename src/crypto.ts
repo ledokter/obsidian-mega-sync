@@ -73,7 +73,7 @@ export function decryptSecrets(blob: EncryptedBlob, passphrase: string): Secrets
     email: typeof obj["email"] === "string" ? obj["email"] : "",
     password: typeof obj["password"] === "string" ? obj["password"] : "",
     secondFactorCode: typeof obj["secondFactorCode"] === "string" ? obj["secondFactorCode"] : "",
-    session: isSessionCache(obj["session"]) ? (obj["session"] as SessionCache) : null,
+    session: isSessionCache(obj["session"]) ? obj["session"] : null,
   };
 }
 

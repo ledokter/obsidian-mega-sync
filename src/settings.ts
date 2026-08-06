@@ -37,7 +37,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderUnlock(): void {
     const { containerEl } = this;
-    new Setting(containerEl).setName("MEGA Sync — locked").setHeading();
+    new Setting(containerEl).setName("Locked").setHeading();
     containerEl.createEl("p", {
       text: "Your MEGA credentials are encrypted at rest. Enter your master passphrase to unlock.",
     });
@@ -178,7 +178,6 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderHeader(): void {
     const { containerEl } = this;
-    new Setting(containerEl).setName("MEGA Sync").setHeading();
     containerEl.createEl("p", {
       text: "Two-way synchronisation between this vault and a folder on your MEGA.nz account. Inspired by Remotely Save, MEGA-only.",
     });
