@@ -14,7 +14,7 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
 | `manifest.json` complete & compliant | ✅ (id `mega-sync`, no `obsidian` in id, no `fundingUrl`) |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.1.1 |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.1.1 |
 | `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.1.1` on `master`) |
 | `versions.json` present | ✅ |
 | README + LICENSE | ✅ |
@@ -40,7 +40,7 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 The directory reads the `manifest.json` at the HEAD of `master` (currently
 `1.1.1`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
 GitHub release whose tag matches the manifest version — that release
-(`v1.1.1`) already exists with all three assets.
+(`1.1.1`) already exists with all three assets.
 
 ## After submission
 
@@ -73,8 +73,8 @@ Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plug
       `test-connection`, `lock`) — Obsidian prefixes them automatically.
 - [x] No sample/template code; original implementation.
 - [x] No remote code loading; not obfuscated; full TypeScript source in the repo.
-- [x] GitHub release `v1.1.1` attaches `main.js`, `manifest.json`, `styles.css`.
-- [x] Release tag (`v1.1.1`) matches `manifest.json` version (`1.1.1`).
+- [x] GitHub release `1.1.1` attaches `main.js`, `manifest.json`, `styles.css`.
+- [x] Release tag (`1.1.1`) matches `manifest.json` version (`1.1.1`).
 
 ## Manual test before review
 
