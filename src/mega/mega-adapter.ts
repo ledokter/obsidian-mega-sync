@@ -1,15 +1,16 @@
 // MEGA.nz adapter built on top of the `megajs` library.
 //
 // Responsibilities:
-//   - Authenticate (email + password, optional 2FA), caching the session.
+//   - Authenticate (email + password, optional 2FA), OR revive a cached
+//     session (sid + key) without re-sending the password.
 //   - Resolve / create the remote base folder (+ optional sub-folder).
 //   - List the remote tree into a flat map of vault-relative path -> RemoteFile.
 //   - Upload, download, rename, delete, mkdir.
 //   - Persist / read the sync snapshot on MEGA so multiple devices converge.
-import { Storage, MutableFile, File } from "megajs";
+import { Storage, MutableFile } from "megajs";
 import { Logger } from "../ui/logger";
 import { joinPath, normalizePath } from "../util";
-import { SyncSnapshot, FileEntry } from "../sync/types";
+import { SyncSnapshot, FileEntry, SessionCache } from "../sync/types";
 
 const SNAPSHOT_FILE = "_mega_sync_snapshot.json";
 
@@ -27,6 +28,9 @@ export interface MegaAdapterOpts {
   secondFactorCode?: string;
   baseFolder: string;
   remoteSubFolder?: string;
+  /** Optional cached session. If valid, authentication reuses it and skips
+   *  the password-based login. */
+  session?: SessionCache | null;
 }
 
 export class MegaAdapter {
@@ -34,20 +38,41 @@ export class MegaAdapter {
   private baseNode: MutableFile | null = null;
   private logger: Logger;
   private opts: MegaAdapterOpts;
+  /** True if the last successful connect came from the cached session. */
+  revived = false;
 
   constructor(logger: Logger, opts: MegaAdapterOpts) {
     this.logger = logger;
     this.opts = opts;
   }
 
-  /** Open (or reuse) a MEGA session. */
+  /** Open (or reuse) a MEGA session. Tries the cached session first, then
+   *  falls back to a full email+password login. */
   async connect(): Promise<void> {
     if (this.storage) return;
+
+    // 1) Try to revive the cached session (no password needed).
+    if (this.opts.session && this.opts.session.sid && this.opts.session.key) {
+      try {
+        this.logger.info("Reusing cached MEGA session…");
+        const storage = await this.revive(this.opts.session, this.opts.email);
+        this.storage = storage;
+        this.revived = true;
+        this.logger.ok("MEGA session restored from cache (no password sent).");
+        return;
+      } catch (e) {
+        this.logger.warn(
+          `Cached session rejected (${e instanceof Error ? e.message : String(e)}); falling back to login.`,
+        );
+      }
+    }
+
+    // 2) Full login with credentials.
     const { email, password, secondFactorCode } = this.opts;
     if (!email || !password) {
       throw new Error("MEGA credentials are not configured.");
     }
-    this.logger.info(`Connecting to MEGA as ${email}…`);
+    this.logger.info(`Logging in to MEGA as ${email}…`);
     const storage = new Storage({
       email,
       password,
@@ -67,7 +92,52 @@ export class MegaAdapter {
       throw e;
     }
     this.storage = storage;
-    this.logger.ok("MEGA session established.");
+    this.revived = false;
+    this.logger.ok("MEGA session established via login.");
+  }
+
+  /** Revive a cached session: build a Storage from {key, sid} (autologin off),
+   *  then load the user record + file tree using the existing sid. */
+  private async revive(session: SessionCache, email: string): Promise<Storage> {
+    const storage = Storage.fromJSON({
+      key: session.key,
+      sid: session.sid,
+      name: session.name ?? "",
+      user: session.user ?? "",
+      options: {
+        email,
+        autoload: false,
+        autologin: false,
+      } as any,
+    } as any);
+    await new Promise<void>((resolve, reject) => {
+      storage.api.request({ a: "ug" } as any, (err: any, resp: any) => {
+        if (err) return reject(new Error(`ug: ${err}`));
+        if (resp) {
+          storage.name = resp.name ?? storage.name;
+          storage.user = resp.u ?? storage.user;
+        }
+        storage.reload(true, (e: any) => {
+          if (e) return reject(new Error(`reload: ${e}`));
+          storage.status = "ready";
+          resolve();
+        });
+      });
+    });
+    return storage;
+  }
+
+  /** Return the current session as a cache object (safe to persist — it does
+   *  NOT contain the password). */
+  getSession(): SessionCache | null {
+    if (!this.storage) return null;
+    const j = (this.storage as any).toJSON();
+    return {
+      key: j.key,
+      sid: j.sid,
+      name: j.name,
+      user: j.user,
+    };
   }
 
   /** Resolve (creating if needed) the base folder + optional sub-folder. */

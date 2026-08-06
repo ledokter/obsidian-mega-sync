@@ -44,7 +44,8 @@ MEGA Sync synchronise le contenu de votre vault Obsidian avec un dossier de votr
 ### Sécurité & confidentialité
 
 - Votre mot de passe MEGA est stocké **localement** dans `data.json` du plugin (dans le dossier `.obsidian/plugins/mega-sync/` de votre vault). Il n'est jamais envoyé ailleurs qu'à l'API MEGA.
-- Vous pouvez verrouiller les réglages par un mot de passe distinct.
+- **Chiffrement au repos** : réglages → Security → « Enable encryption ». Vos identifiants MEGA (email, mot de passe, code 2FA) **et** la session mise en cache sont alors chiffrés en **AES-256-GCM** (clé dérivée par **scrypt** depuis une passphrase maître). La passphrase n'est **jamais** écrite sur disque — elle vit uniquement en mémoire pour la session. Une fois activée, elle verrouille aussi le panneau de réglages.
+- **Persistance de session** : après une première connexion réussie, le plugin met en cache la session MEGA (`sid` + clé, sans le mot de passe). Les syncs suivantes réutilisent cette session et n'envoient plus le mot de passe à MEGA. Si la session expire, le plugin retombe automatiquement sur le login email+password.
 - Le plugin ne charge **aucun code distant** et n'est pas obfusqué (conforme aux [exigences Obsidian](https://docs.obsidian.md/Plugins/Releasing+your+plugin)).
 - **Important** : ne placez pas `data.json` dans un dépôt public.
 
@@ -91,6 +92,8 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 ### Security
 
 - Your MEGA password is stored **locally** in the plugin's `data.json` (inside your vault's `.obsidian/plugins/mega-sync/`). It is only ever sent to the MEGA API.
+- **At-rest encryption**: Settings → Security → "Enable encryption". Your MEGA credentials (email, password, 2FA) **and** the cached session are then encrypted with **AES-256-GCM** (key derived via **scrypt** from a master passphrase). The passphrase is **never** written to disk — it lives only in memory for the session. Once set, it also locks the settings panel.
+- **Session persistence**: after a first successful login, the plugin caches the MEGA session (`sid` + key, no password). Subsequent syncs reuse that session and no longer send your password to MEGA. If the session expires, the plugin automatically falls back to email+password login.
 - You can lock the settings panel with a separate passphrase.
 - The plugin loads **no remote code** and is **not obfuscated**, per Obsidian's plugin requirements.
 - Do not commit `data.json` to a public repository.
@@ -102,6 +105,8 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 | Backends | Dropbox, OneDrive, WebDAV, S3… | **MEGA.nz only** |
 | Two-way sync | ✅ | ✅ |
 | Snapshot-based merge | ✅ | ✅ |
+| Session caching (no password re-sent) | ➖ | ✅ |
+| Encrypted secrets at rest (AES-256-GCM) | ➖ | ✅ |
 | Sync on startup / interval / change | ✅ | ✅ |
 | Include/exclude globs | ✅ | ✅ |
 | `.obsidian` sync toggle | ✅ | ✅ |

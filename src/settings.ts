@@ -1,11 +1,12 @@
-// Settings UI — mirrors Remotely Save's options, restricted to MEGA.
+// Settings UI — mirrors Remotely Save's options, restricted to MEGA, plus
+// a master-passphrase panel that encrypts the MEGA credentials + cached
+// session at rest (AES-256-GCM).
 import { App, PluginSettingTab, Setting, Modal, Notice } from "obsidian";
 import { MegaSyncPlugin } from "./main";
 import { DEFAULT_SETTINGS, MegaSyncSettings } from "./sync/types";
 
 export class MegaSyncSettingTab extends PluginSettingTab {
   plugin: MegaSyncPlugin;
-  private unlocked = false;
 
   constructor(app: App, plugin: MegaSyncPlugin) {
     super(app, plugin);
@@ -16,12 +17,13 @@ export class MegaSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    if (this.plugin.settings.settingsPassword && !this.unlocked) {
-      this.renderLock();
+    if (this.plugin.isLocked()) {
+      this.renderUnlock();
       return;
     }
 
     this.renderHeader();
+    this.renderSecurity();
     this.renderCredentials();
     this.renderRemoteFolder();
     this.renderSyncTriggers();
@@ -31,27 +33,151 @@ export class MegaSyncSettingTab extends PluginSettingTab {
     this.renderDanger();
   }
 
-  private renderLock(): void {
+  // ----- Security / encryption --------------------------------------------
+
+  private renderUnlock(): void {
     const { containerEl } = this;
-    containerEl.createEl("h2", { text: "MEGA Sync — settings locked" });
-    new Setting(containerEl)
-      .setName("Settings password")
-      .setDesc("Enter the password you set to unlock this settings panel.")
-      .addText((t) =>
-        t.inputEl.setAttribute("type", "password"),
-      )
-      .addButton((b) => {
-        b.setButtonText("Unlock").onClick(() => {
-          const input = containerEl.querySelector("input[type=password]") as HTMLInputElement;
-          if (input.value === this.plugin.settings.settingsPassword) {
-            this.unlocked = true;
-            this.display();
-          } else {
-            new Notice("Wrong settings password.");
-          }
-        });
-      });
+    containerEl.createEl("h2", { text: "MEGA Sync — locked" });
+    containerEl.createEl("p", {
+      text: "Your MEGA credentials are encrypted at rest. Enter your master passphrase to unlock.",
+    });
+    const inputEl = containerEl.createEl("input", { type: "password" });
+    inputEl.placeholder = "Master passphrase";
+    inputEl.style.width = "100%";
+    inputEl.style.marginBottom = "12px";
+
+    const tryUnlock = async () => {
+      try {
+        await this.plugin.unlock(inputEl.value);
+        inputEl.value = "";
+        this.display();
+      } catch (e) {
+        new Notice(e instanceof Error ? e.message : "Wrong passphrase.");
+      }
+    };
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") tryUnlock();
+    });
+
+    new Setting(containerEl).addButton((b) =>
+      b.setButtonText("Unlock").onClick(tryUnlock),
+    );
   }
+
+  private renderSecurity(): void {
+    const { containerEl } = this;
+    containerEl.createEl("h3", { text: "Security" });
+
+    const encrypted = this.plugin.settings.secretsEncrypted;
+    if (encrypted) {
+      new Setting(containerEl)
+        .setName("Secrets encrypted")
+        .setDesc("Your MEGA email, password, 2FA code and cached session are encrypted at rest with AES-256-GCM. The passphrase is only kept in memory for this session.")
+        .addButton((b) =>
+          b.setButtonText("Lock now").onClick(() => {
+            this.plugin.lockNow();
+            new Notice("MEGA Sync locked.");
+            this.display();
+          }),
+        );
+      new Setting(containerEl)
+        .setName("Disable encryption")
+        .setDesc("Decrypt and store secrets in plaintext again. Requires the current passphrase.")
+        .addButton((b) => {
+          b.setButtonText("Disable").setWarning().onClick(async () => {
+            const pass = await this.askPassphrase("Disable encryption", "Enter current master passphrase");
+            if (pass === null) return;
+            try {
+              await this.plugin.disableEncryption(pass);
+              new Notice("Encryption disabled.");
+              this.display();
+            } catch (e) {
+              new Notice(e instanceof Error ? e.message : "Failed.");
+            }
+          });
+        });
+    } else {
+      new Setting(containerEl)
+        .setName("Master passphrase")
+        .setDesc("Set a passphrase to encrypt your MEGA credentials and cached session at rest. It will also lock this settings panel. Without it, secrets are stored in plaintext in data.json.")
+        .addButton((b) =>
+          b.setButtonText("Enable encryption").onClick(async () => {
+            const pass = await this.askPassphrase("Set master passphrase", "Choose a passphrase", true);
+            if (pass === null) return;
+            try {
+              await this.plugin.setMasterPassphrase(pass);
+              new Notice("Secrets encrypted at rest.");
+              this.display();
+            } catch (e) {
+              new Notice(e instanceof Error ? e.message : "Failed.");
+            }
+          }),
+        );
+      new Setting(containerEl)
+        .setName("Plaintext warning")
+        .setDesc("Until you enable encryption, your MEGA password is stored in clear text inside this vault. Do not commit the .obsidian folder to a public repository.")
+        .setDisabled(true);
+    }
+  }
+
+  /** Small prompt modal returning the typed passphrase (or null on cancel). */
+  private askPassphrase(
+    title: string,
+    label: string,
+    withConfirm = false,
+  ): Promise<string | null> {
+    return new Promise((resolve) => {
+      const modal = new Modal(this.app);
+      modal.titleEl.setText(title);
+      const row1 = modal.contentEl.createEl("div");
+      row1.createEl("label", { text: label });
+      const i1 = row1.createEl("input", { type: "password" });
+      i1.style.width = "100%";
+      i1.style.marginTop = "6px";
+      let i2: HTMLInputElement | null = null;
+      if (withConfirm) {
+        const row2 = modal.contentEl.createEl("div");
+        row2.style.marginTop = "10px";
+        row2.createEl("label", { text: "Confirm passphrase" });
+        i2 = row2.createEl("input", { type: "password" });
+        i2.style.width = "100%";
+        i2.style.marginTop = "6px";
+      }
+      const btnRow = modal.contentEl.createEl("div");
+      btnRow.style.marginTop = "14px";
+      btnRow.style.textAlign = "right";
+      const cancel = btnRow.createEl("button", { text: "Cancel" });
+      const ok = btnRow.createEl("button", { text: "OK" });
+      ok.classList.add("mod-cta");
+      const submit = () => {
+        const v = i1.value;
+        if (!v) {
+          new Notice("Passphrase cannot be empty.");
+          return;
+        }
+        if (i2 && i2.value !== v) {
+          new Notice("Passphrases do not match.");
+          return;
+        }
+        i1.value = "";
+        if (i2) i2.value = "";
+        modal.close();
+        resolve(v);
+      };
+      ok.onclick = submit;
+      i1.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+      });
+      cancel.onclick = () => {
+        modal.close();
+        resolve(null);
+      };
+      modal.onClose = () => resolve(null);
+      modal.open();
+    });
+  }
+
+  // ----- Header & credentials ---------------------------------------------
 
   private renderHeader(): void {
     const { containerEl } = this;
@@ -65,51 +191,54 @@ export class MegaSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.createEl("h3", { text: "MEGA account" });
 
+    const s = this.plugin.secrets;
+    if (!s) {
+      containerEl.createEl("p", { text: "Secrets are not available in this session." });
+      return;
+    }
+
     new Setting(containerEl)
       .setName("Email")
       .setDesc("Your MEGA account email.")
       .addText((t) =>
         t
           .setPlaceholder("you@example.com")
-          .setValue(this.plugin.settings.email)
-          .onChange((v) => this.apply("email", v)),
+          .setValue(s.email)
+          .onChange(async (v) => {
+            s.email = v;
+            await this.plugin.persistSecrets();
+          }),
       );
 
     new Setting(containerEl)
       .setName("Password")
-      .setDesc("Your MEGA account password. Stored locally in this vault's plugin data. Use a settings password to lock this panel.")
+      .setDesc("Your MEGA account password. Stored encrypted at rest if a master passphrase is set.")
       .addText((t) => {
         t.inputEl.setAttribute("type", "password");
-        t.setValue(this.plugin.settings.password)
-          .onChange((v) => this.apply("password", v));
+        t.setValue(s.password).onChange(async (v) => {
+          s.password = v;
+          await this.plugin.persistSecrets();
+        });
       });
 
     new Setting(containerEl)
       .setName("2FA code (optional)")
-      .setDesc("If you have two-factor authentication enabled on MEGA, enter the current code. Leave blank otherwise. Needed only at login time.")
+      .setDesc("If you have two-factor authentication on MEGA, enter the current code. Needed only at login time; blank otherwise.")
       .addText((t) =>
         t
           .setPlaceholder("123456")
-          .setValue(this.plugin.settings.secondFactorCode)
-          .onChange((v) => this.apply("secondFactorCode", v)),
+          .setValue(s.secondFactorCode)
+          .onChange(async (v) => {
+            s.secondFactorCode = v;
+            await this.plugin.persistSecrets();
+          }),
       );
-
-    new Setting(containerEl)
-      .setName("Settings password")
-      .setDesc("Optional passphrase required to open this settings panel. Leave blank to disable.")
-      .addText((t) => {
-        t.inputEl.setAttribute("type", "password");
-        t.setValue(this.plugin.settings.settingsPassword)
-          .onChange((v) => this.apply("settingsPassword", v));
-      });
 
     new Setting(containerEl)
       .setName("Test connection")
       .setDesc("Connect to MEGA and list the base folder to verify the credentials.")
       .addButton((b) =>
-        b.setButtonText("Test").onClick(async () => {
-          await this.plugin.testConnection();
-        }),
+        b.setButtonText("Test").onClick(() => this.plugin.testConnection()),
       );
   }
 
@@ -142,7 +271,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Sync on startup")
-      .setDesc("Start a sync automatically when Obsidian opens.")
+      .setDesc("Start a sync automatically when Obsidian opens. Requires unlocking the master passphrase (or no encryption).")
       .addToggle((t) =>
         t
           .setValue(this.plugin.settings.syncOnStartup)
@@ -334,13 +463,20 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Reset all settings")
-      .setDesc("Restore the default configuration. Does NOT delete your files.")
+      .setDesc("Restore the default configuration. Does NOT delete your files or your encrypted secrets blob.")
       .addButton((b) =>
         b
           .setButtonText("Reset")
           .setWarning()
           .onClick(async () => {
+            const blob = this.plugin.settings.secretsBlob;
+            const enc = this.plugin.settings.secretsEncrypted;
             this.plugin.settings = { ...DEFAULT_SETTINGS };
+            this.plugin.settings.secretsBlob = blob;
+            this.plugin.settings.secretsEncrypted = enc;
+            if (!enc) {
+              this.plugin.secrets = { email: "", password: "", secondFactorCode: "", session: null };
+            }
             await this.plugin.saveSettings();
             this.display();
             new Notice("Settings reset to defaults.");
@@ -355,6 +491,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
     this.plugin.settings[key] = value;
     await this.plugin.saveSettings();
     this.plugin.applyUiVisibility();
+    if (key === "syncIntervalMinutes") this.plugin.scheduleInterval();
   }
 }
 
@@ -372,11 +509,10 @@ export class LogModal extends Modal {
     this.modalEl.addClass("mega-sync-log-modal");
     const box = contentEl.createDiv({ cls: "mega-sync-log" });
     for (const line of this.plugin.logger.getLines()) {
-      const row = box.createEl("div", {
+      box.createEl("div", {
         cls: `log-${line.level}`,
         text: `[${line.stamp}] ${line.text}`,
       });
-      row.setAttribute("data-level", line.level);
     }
     box.scrollTop = box.scrollHeight;
   }

@@ -42,19 +42,56 @@ export interface SyncOp {
   reason: string;
 }
 
+/** Lightweight representation of a cached MEGA session (no password). */
+export interface SessionCache {
+  /** e64-encoded master key (from megajs `toJSON().key`). */
+  key: string;
+  /** Session id string. */
+  sid: string;
+  name?: string;
+  user?: string;
+}
+
+/** The decrypted MEGA secrets held in memory only. */
+export interface Secrets {
+  email: string;
+  password: string;
+  secondFactorCode: string;
+  session: SessionCache | null;
+}
+
+/** Encrypted container persisted at rest. */
+export interface EncryptedBlob {
+  /** Base64 ciphertext. */
+  cipher: string;
+  /** Base64 12-byte IV. */
+  iv: string;
+  /** Base64 16-byte salt. */
+  salt: string;
+  /** Base64 GCM auth tag. */
+  tag: string;
+}
+
 /** Plugin settings persisted in data.json. */
 export interface MegaSyncSettings {
-  /** MEGA account email. */
+  /** MEGA account email (plaintext, only when encryption is disabled). */
   email: string;
-  /** MEGA account password (stored locally, optionally encrypted at rest). */
+  /** MEGA account password (plaintext, only when encryption is disabled). */
   password: string;
-  /** 2FA / second factor code (blank if not enabled). Recomputed each sync if needed. */
+  /** 2FA / second factor code (plaintext, only when encryption is disabled). */
   secondFactorCode: string;
+  /** Cached MEGA session (plaintext, only when encryption is disabled). */
+  session: SessionCache | null;
   /** Folder name on MEGA used as the sync root (created if missing). */
   baseFolder: string;
   /** Sub-folder inside the base folder (e.g. for multiple vaults). Blank = root. */
   remoteSubFolder: string;
-  /** Master passphrase to lock the settings UI. Blank = no lock. */
+
+  /** Whether secrets are encrypted at rest with a master passphrase. */
+  secretsEncrypted: boolean;
+  /** The encrypted secrets blob (when `secretsEncrypted` is true). */
+  secretsBlob: EncryptedBlob | null;
+  /** Legacy settings lock password (migrated to encryption on first load). */
   settingsPassword: string;
 
   /** Sync automatically on Obsidian startup. */
@@ -102,8 +139,11 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   email: "",
   password: "",
   secondFactorCode: "",
+  session: null,
   baseFolder: "Obsidian-MEGA-Sync",
   remoteSubFolder: "",
+  secretsEncrypted: false,
+  secretsBlob: null,
   settingsPassword: "",
   syncOnStartup: false,
   syncIntervalMinutes: 0,
