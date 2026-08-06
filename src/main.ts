@@ -235,22 +235,22 @@ export class MegaSyncPlugin extends Plugin {
 
   addCommands(): void {
     this.addCommand({
-      id: "mega-sync-now",
+      id: "sync-now",
       name: "Sync now",
       callback: () => this.startSync(false).catch(() => {}),
     });
     this.addCommand({
-      id: "mega-sync-show-log",
+      id: "show-log",
       name: "Show sync log",
       callback: () => this.openLogModal(),
     });
     this.addCommand({
-      id: "mega-sync-test-connection",
+      id: "test-connection",
       name: "Test MEGA connection",
       callback: () => this.testConnection(),
     });
     this.addCommand({
-      id: "mega-sync-lock",
+      id: "lock",
       name: "Lock secrets now",
       callback: () => {
         this.lockNow();
