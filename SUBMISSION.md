@@ -10,7 +10,9 @@ official Obsidian community plugin directory.
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
 | `manifest.json` complete | ✅ |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.0.0 |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.1.0 |
+| At-rest encryption (AES-256-GCM + scrypt) | ✅ |
+| MEGA session caching (no password re-sent) | ✅ |
 | Fork of `obsidianmd/obsidian-releases` | ✅ https://github.com/ledokter/obsidian-releases |
 | Branch `add-mega-sync-plugin` (1 commit) | ✅ ahead of `master` by 1 |
 | Pull request opened | ⏳ **manual step below** |
@@ -49,7 +51,7 @@ Suggested PR body:
 - **Name:** MEGA Sync
 - **Author:** ledokter
 - **Repo:** https://github.com/ledokter/obsidian-mega-sync
-- **Release:** https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.0.0
+- **Release:** https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.1.0
 
 ## Description
 Two-way synchronisation between an Obsidian vault and a folder on the user's
