@@ -1,98 +1,82 @@
-# Submission to the Obsidian community plugin store
+# Submission to the Obsidian community plugin directory
 
-This document tracks the state of the submission of **MEGA Sync** to the
-official Obsidian community plugin directory.
+Obsidian **no longer** accepts submissions via pull requests to
+`obsidianmd/obsidian-releases` (PRs and issues are disabled on that repo).
+The official channel is now the **Obsidian Community directory** at
+<https://community.obsidian.md>.
+
+Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 
 ## Status
 
 | Step | Status |
 |---|---|
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
-| `manifest.json` complete | ✅ |
+| `manifest.json` complete & compliant | ✅ (id `mega-sync`, no `obsidian` in id, no `fundingUrl`) |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.1.0 |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.1.1 |
+| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.1.1` on `master`) |
+| `versions.json` present | ✅ |
+| README + LICENSE | ✅ |
 | At-rest encryption (AES-256-GCM + scrypt) | ✅ |
 | MEGA session caching (no password re-sent) | ✅ |
-| Fork of `obsidianmd/obsidian-releases` | ✅ https://github.com/ledokter/obsidian-releases |
-| Branch `add-mega-sync-plugin` (1 commit) | ✅ ahead of `master` by 1 |
-| Pull request opened | ⏳ **manual step below** |
-| Accepted by Obsidian | ⏳ pending review |
+| Submitted via community.obsidian.md | ⏳ **manual step below** |
+| Accepted & published | ⏳ pending review |
 
-## Why the PR is not opened automatically
+## How to submit (3 minutes)
 
-The GitHub account used (`ledokter`) can fork, push, and create releases, but
-the OAuth token could not open a pull request against `obsidianmd/obsidian-releases`
-(error: `does not have the correct permissions to execute CreatePullRequest`,
-which is the usual signature of an **SSO/organisation permission** gate on the
-Obsidian org). This must be done from a browser where the account has an
-interactive session.
+1. Go to **<https://community.obsidian.md>** and sign in with your **Obsidian account**.
+2. **Link your GitHub account** to your profile (Profile → Settings → GitHub).
+   The directory uses this to verify you own the repository.
+3. In the sidebar, choose **Plugins → New plugin**.
+4. Enter the repository URL:
+   ```
+   https://github.com/ledokter/obsidian-mega-sync
+   ```
+5. Review and agree to the **Developer policies**, and confirm you'll keep
+   supporting the plugin.
+6. Click **Submit**.
 
-## Open the PR (one click)
+The directory reads the `manifest.json` at the HEAD of `master` (currently
+`1.1.1`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
+GitHub release whose tag matches the manifest version — that release
+(`v1.1.1`) already exists with all three assets.
 
-Click the link below — it opens GitHub's compare page with the branch already
-selected. Click **"Create pull request"**.
+## After submission
 
-```
-https://github.com/obsidianmd/obsidian-releases/compare/master...ledokter:obsidian-releases:add-mega-sync-plugin
-```
+- The directory runs an **automated review** and shows guidance for anything
+  to correct. To address feedback: fix the repo, bump the version in
+  `manifest.json` + `versions.json`, run `node esbuild.config.mjs production`,
+  commit, push, and create a new GitHub release whose tag matches the new
+  version. Then back on community.obsidian.md, edit the description and select
+  **Publish**.
+- The plugin won't be installable from inside Obsidian until the automated
+  review passes.
+- Once published, announce it:
+  - Forum: <https://forum.obsidian.md/c/share-showcase/9>
+  - Discord `#updates` (needs the `developer` role).
 
-Suggested PR title:
+## Compliance checklist (verified)
 
-```
-Add MEGA Sync plugin
-```
+Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins>:
 
-Suggested PR body:
-
-```
-## New community plugin submission
-
-- **Plugin ID:** `mega-sync`
-- **Name:** MEGA Sync
-- **Author:** ledokter
-- **Repo:** https://github.com/ledokter/obsidian-mega-sync
-- **Release:** https://github.com/ledokter/obsidian-mega-sync/releases/tag/v1.1.0
-
-## Description
-Two-way synchronisation between an Obsidian vault and a folder on the user's
-MEGA.nz account. Inspired by Remotely Save, restricted to MEGA.nz only.
-Three-way snapshot merge (local / remote / last-sync) with conflict copies,
-include/exclude glob filters, sync on startup/interval/after-changes, status
-bar + ribbon icon, optional settings-password lock. Uses the bundled `megajs`
-library.
-
-## Checklist
-- [x] `manifest.json` has id, name, version, minAppVersion, description, author,
-      authorUrl, isDesktopOnly
-- [x] GitHub release v1.0.0 attaches main.js, manifest.json, styles.css
-- [x] No remote code loaded; not obfuscated
-- [x] Repo is public with source
-- [x] minAppVersion = 1.5.0
-
-## Notes
-- Desktop-only (Electron / Node APIs used by megajs: Buffer, node crypto).
-- MEGA password stored locally in plugin data.json, only sent to MEGA API.
-```
-
-## Obsidian requirements verification
-
-Per https://docs.obsidian.md/Plugins/Releasing+your+plugin:
-
-1. **Repo is public** ✅ — `ledokter/obsidian-mega-sync`.
-2. **`manifest.json` fields** ✅ — id, name, version, minAppVersion, description,
-   author, authorUrl, isDesktopOnly (no funding required).
-3. **Release assets** ✅ — `main.js`, `manifest.json`, `styles.css` attached to
-   release `v1.0.0`.
-4. **`minAppVersion`** ✅ — `1.5.0` (a real Obsidian API version).
-5. **No remote code** ✅ — everything is bundled into `main.js`; the plugin makes
-   network calls only to the MEGA API.
-6. **Not obfuscated** ✅ — full TypeScript source in the repo.
-7. **Entry added to `community-plugins.json`** ✅ — on branch
-   `add-mega-sync-plugin` of the fork.
+- [x] `manifest.json` fields: `id`, `name`, `version` (x.y.z), `minAppVersion`,
+      `description`, `author`, `authorUrl`, `isDesktopOnly`.
+- [x] `id` = `mega-sync` — unique, lowercase, does not contain `obsidian`.
+- [x] No `fundingUrl` (no donation channel is configured).
+- [x] `description` ≤ 250 chars, ends with `.`, no emoji, proper capitalization
+      (Obsidian, MEGA.nz, Remotely Save).
+- [x] `minAppVersion` = `1.5.0` (a real Obsidian API version).
+- [x] `isDesktopOnly: true` — the plugin uses Node.js APIs (`crypto`, `Buffer`)
+      via the bundled `megajs` library, which are desktop-only.
+- [x] Command ids do **not** include the plugin id (`sync-now`, `show-log`,
+      `test-connection`, `lock`) — Obsidian prefixes them automatically.
+- [x] No sample/template code; original implementation.
+- [x] No remote code loading; not obfuscated; full TypeScript source in the repo.
+- [x] GitHub release `v1.1.1` attaches `main.js`, `manifest.json`, `styles.css`.
+- [x] Release tag (`v1.1.1`) matches `manifest.json` version (`1.1.1`).
 
 ## Manual test before review
-
-To install the plugin locally for testing:
 
 ```
 mkdir -p "<vault>/.obsidian/plugins/mega-sync"
