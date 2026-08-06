@@ -153,10 +153,6 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   syncVaultConfig: false,
   excludePatterns: [
     ".trash/**",
-    ".obsidian/workspace.json",
-    ".obsidian/workspace-mobile.json",
-    ".obsidian/cache",
-    ".obsidian/plugins/mega-sync/data.json",
     "node_modules/**",
     ".git/**",
   ].join("\n"),

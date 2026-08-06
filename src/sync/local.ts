@@ -7,14 +7,18 @@ import { matchesAnyPattern, normalizePath } from "../util";
 export class LocalInventory {
   constructor(private app: App, private settings: MegaSyncSettings) {}
 
-  /** Patterns always excluded, regardless of settings (plugin internals). */
+  /** Patterns always excluded, regardless of settings (plugin internals +
+   *  machine-specific files that should never be synced). */
   private alwaysExcluded(): string[] {
     const config = this.app.vault.configDir; // ".obsidian" by default, configurable
     return [
       ".mega-sync-conflicts/**",
       ".mega-sync-log/**",
-      // The plugin's own data file must never be synced.
-      `${config}/plugins/mega-sync/data.json`,
+      // Machine-specific config files: window layout, cache, plugin data.
+      `${config}/workspace.json`,
+      `${config}/workspace-mobile.json`,
+      `${config}/cache`,
+      `${config}/plugins/mega-sync/**`,
     ];
   }
 
