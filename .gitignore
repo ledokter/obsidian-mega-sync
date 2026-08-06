@@ -1,0 +1,6 @@
+node_modules/
+main.js
+*.log
+.DS_Store
+dist-types/
+.env
