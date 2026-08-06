@@ -8,7 +8,7 @@ import {
   randomBytes,
   scryptSync,
 } from "crypto";
-import { Secrets, EncryptedBlob } from "./sync/types";
+import { Secrets, EncryptedBlob, SessionCache } from "./sync/types";
 
 const PAYLOAD_MAGIC = "MEGA-SYNC-SECRETS-v1";
 const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
@@ -56,20 +56,30 @@ export function decryptSecrets(blob: EncryptedBlob, passphrase: string): Secrets
   } catch {
     throw new Error("Wrong master passphrase, or the secrets were tampered with.");
   }
-  let obj: any;
+  let raw: unknown;
   try {
-    obj = JSON.parse(plain.toString("utf8"));
+    raw = JSON.parse(plain.toString("utf8"));
   } catch {
     throw new Error("Decrypted secrets payload is not valid JSON.");
   }
-  if (obj?.__magic !== PAYLOAD_MAGIC) {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("Decrypted secrets payload is not an object.");
+  }
+  const obj = raw as Record<string, unknown>;
+  if (obj["__magic"] !== PAYLOAD_MAGIC) {
     throw new Error("Secrets payload magic mismatch — refusing to load.");
   }
-  delete obj.__magic;
   return {
-    email: obj.email ?? "",
-    password: obj.password ?? "",
-    secondFactorCode: obj.secondFactorCode ?? "",
-    session: obj.session ?? null,
+    email: typeof obj["email"] === "string" ? obj["email"] : "",
+    password: typeof obj["password"] === "string" ? obj["password"] : "",
+    secondFactorCode: typeof obj["secondFactorCode"] === "string" ? obj["secondFactorCode"] : "",
+    session: isSessionCache(obj["session"]) ? (obj["session"] as SessionCache) : null,
   };
+}
+
+/** Runtime check for a cached session object. */
+function isSessionCache(v: unknown): v is SessionCache {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return typeof o["key"] === "string" && typeof o["sid"] === "string";
 }

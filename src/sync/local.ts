@@ -4,16 +4,19 @@ import { App, TFile, TFolder, TAbstractFile, Vault } from "obsidian";
 import { MegaSyncSettings, FileEntry } from "./types";
 import { matchesAnyPattern, normalizePath } from "../util";
 
-/** Patterns always excluded, regardless of settings (plugin internals). */
-const ALWAYS_EXCLUDED = [
-  ".mega-sync-conflicts/**",
-  ".mega-sync-log/**",
-  // The plugin's own data file must never be synced.
-  ".obsidian/plugins/mega-sync/data.json",
-];
-
 export class LocalInventory {
   constructor(private app: App, private settings: MegaSyncSettings) {}
+
+  /** Patterns always excluded, regardless of settings (plugin internals). */
+  private alwaysExcluded(): string[] {
+    const config = this.app.vault.configDir; // ".obsidian" by default, configurable
+    return [
+      ".mega-sync-conflicts/**",
+      ".mega-sync-log/**",
+      // The plugin's own data file must never be synced.
+      `${config}/plugins/mega-sync/data.json`,
+    ];
+  }
 
   /** Build the local inventory map. */
   async build(): Promise<Map<string, FileEntry>> {
@@ -36,8 +39,8 @@ export class LocalInventory {
           size: child.stat.size,
         });
       } else if (child instanceof TFolder) {
-        // Skip the .obsidian folder entirely unless configured to include it.
-        if (rel === ".obsidian" && !this.settings.syncVaultConfig) continue;
+        // Skip the config folder entirely unless configured to include it.
+        if (rel === this.app.vault.configDir && !this.settings.syncVaultConfig) continue;
         if (this.isExcluded(rel)) continue;
         await this.walk(child, out);
       }
@@ -45,7 +48,7 @@ export class LocalInventory {
   }
 
   private isExcluded(path: string): boolean {
-    if (ALWAYS_EXCLUDED.some((p) => this.match(p, path))) return true;
+    if (this.alwaysExcluded().some((p) => this.match(p, path))) return true;
     if (matchesAnyPattern(this.settings.excludePatterns, path)) {
       // Allow an explicit include pattern to override.
       if (this.settings.includePatterns.trim().length > 0 &&
@@ -90,7 +93,7 @@ export class LocalInventory {
     if (toTrash) {
       const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) {
-        await this.app.vault.trash(file, true);
+        await this.app.fileManager.trashFile(file);
         return;
       }
     }

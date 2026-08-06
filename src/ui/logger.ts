@@ -41,8 +41,6 @@ export class Logger {
     this.buffer.push(line);
     if (this.buffer.length > this.max) this.buffer.shift();
     if (this.keepFile) this.fileLog.push(`[${line.stamp}] ${level.toUpperCase()} ${msg}`);
-    // eslint-disable-next-line no-console
-    console.log(`[MEGA Sync] ${level}: ${msg}`);
   }
 
   info(msg: string): void {

@@ -35,7 +35,7 @@ export class MegaSyncPlugin extends Plugin {
   private statusEl?: HTMLElement;
   private intervalId?: number;
   private syncing = false;
-  private debounceTimer?: ReturnType<typeof setTimeout>;
+  private debounceTimer?: number;
 
   async onload(): Promise<void> {
     addIcon(ICON_ID, ICON_SVG);
@@ -51,7 +51,7 @@ export class MegaSyncPlugin extends Plugin {
     this.addSettingTab(new MegaSyncSettingTab(this.app, this));
 
     if (this.settings.syncOnStartup) {
-      setTimeout(() => this.startSync(true).catch(() => {}), 3000);
+      window.setTimeout(() => { void this.startSync(true); }, 3000);
     }
     this.scheduleInterval();
 
@@ -65,7 +65,7 @@ export class MegaSyncPlugin extends Plugin {
 
   onunload(): void {
     this.clearInterval();
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (this.debounceTimer) window.clearTimeout(this.debounceTimer);
     // Drop secrets from memory on unload.
     this.secrets = null;
     this.passphrase = null;
@@ -198,9 +198,9 @@ export class MegaSyncPlugin extends Plugin {
   // ----- UI ---------------------------------------------------------------
 
   addRibbon(): void {
-    this.ribbonEl = this.addRibbonIcon(ICON_ID, "MEGA Sync — sync now", () =>
-      this.startSync(false).catch(() => {}),
-    );
+    this.ribbonEl = this.addRibbonIcon(ICON_ID, "MEGA Sync — sync now", () => {
+      void this.startSync(false);
+    });
     this.ribbonEl.addClass("mega-sync-ribbon");
   }
 
@@ -208,7 +208,7 @@ export class MegaSyncPlugin extends Plugin {
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("mega-sync-statusbar");
     this.statusEl.setText("MEGA: ready");
-    this.statusEl.onClickEvent(() => this.startSync(false).catch(() => {}));
+    this.statusEl.onClickEvent(() => { void this.startSync(false); });
   }
 
   setStatus(text: string, cls?: string): void {
@@ -226,7 +226,8 @@ export class MegaSyncPlugin extends Plugin {
       this.ribbonEl = undefined;
     }
     if (this.statusEl) {
-      this.statusEl.style.display = this.settings.showStatusBar ? "" : "none";
+      if (this.settings.showStatusBar) this.statusEl.removeClass("mega-hidden");
+      else this.statusEl.addClass("mega-hidden");
     } else if (this.settings.showStatusBar) {
       this.addStatusBar();
     }
@@ -285,11 +286,11 @@ export class MegaSyncPlugin extends Plugin {
   }
 
   scheduleDebounced(): void {
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(
+    if (this.debounceTimer) window.clearTimeout(this.debounceTimer);
+    this.debounceTimer = window.setTimeout(
       () => {
         this.debounceTimer = undefined;
-        this.startSync(true).catch(() => {});
+        void this.startSync(true);
       },
       Math.max(500, this.settings.syncOnSaveDebounceMs),
     );

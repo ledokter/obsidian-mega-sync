@@ -59,3 +59,13 @@
   background: var(--interactive-accent);
   transition: width 0.2s ease;
 }
+
+/* Layout helpers used by the settings UI (avoid inline styles). */
+.mega-input-full { width: 100%; }
+.mega-textarea-full { width: 100%; }
+.mega-mt-6 { margin-top: 6px; }
+.mega-mt-10 { margin-top: 10px; }
+.mega-mt-14 { margin-top: 14px; }
+.mega-mb-12 { margin-bottom: 12px; }
+.mega-text-right { text-align: right; }
+.mega-hidden { display: none; }

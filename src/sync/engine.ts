@@ -10,12 +10,8 @@ import { MegaAdapter, RemoteFile } from "../mega/mega-adapter";
 import { LocalInventory } from "./local";
 import { Logger } from "../ui/logger";
 import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult } from "./types";
-import { joinPath } from "../util";
 
 const SNAPSHOT_VERSION = 1;
-const SNAPSHOT_FILE = "_mega_sync_snapshot.json";
-
-/** Small tolerance when comparing mtimes (ms). */
 const MTIME_TOLERANCE_MS = 1500;
 
 export class SyncEngine {
@@ -58,7 +54,6 @@ export class SyncEngine {
     };
 
     await this.mega.connect();
-    const base = await this.mega.resolveBase();
 
     // Build inventories.
     this.logger.info("Building local inventory…");
@@ -132,8 +127,6 @@ export class SyncEngine {
       const r = R.get(path);
       const s = S[path];
 
-      const lNew = !!l && !s;
-      const rNew = !!r && !s;
       const lGone = !l && !!s;
       const rGone = !r && !!s;
 

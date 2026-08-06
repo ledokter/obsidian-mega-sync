@@ -2,25 +2,25 @@
 
 /** Promise-based delay. */
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 /** Debounce a function; trailing edge. Returns a wrapper + a cancel(). */
-export function debounce<T extends (...args: any[]) => void>(
+export function debounce<T extends (...args: never[]) => void>(
   fn: T,
   ms: number,
 ): T & { cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const wrapped = ((...args: any[]) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
+  let timer: number | null = null;
+  const wrapped = ((...args: never[]) => {
+    if (timer) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
       timer = null;
       fn(...args);
     }, ms);
   }) as T & { cancel: () => void };
   wrapped.cancel = () => {
     if (timer) {
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       timer = null;
     }
   };

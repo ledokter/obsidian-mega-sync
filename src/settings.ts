@@ -37,14 +37,14 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderUnlock(): void {
     const { containerEl } = this;
-    containerEl.createEl("h2", { text: "MEGA Sync — locked" });
+    new Setting(containerEl).setName("MEGA Sync — locked").setHeading();
     containerEl.createEl("p", {
       text: "Your MEGA credentials are encrypted at rest. Enter your master passphrase to unlock.",
     });
     const inputEl = containerEl.createEl("input", { type: "password" });
     inputEl.placeholder = "Master passphrase";
-    inputEl.style.width = "100%";
-    inputEl.style.marginBottom = "12px";
+    inputEl.addClass("mega-input-full");
+    inputEl.addClass("mega-mb-12");
 
     const tryUnlock = async () => {
       try {
@@ -56,7 +56,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
       }
     };
     inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") tryUnlock();
+      if (e.key === "Enter") void tryUnlock();
     });
 
     new Setting(containerEl).addButton((b) =>
@@ -66,7 +66,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderSecurity(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "Security" });
+    new Setting(containerEl).setName("Security").setHeading();
 
     const encrypted = this.plugin.settings.secretsEncrypted;
     if (encrypted) {
@@ -84,7 +84,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         .setName("Disable encryption")
         .setDesc("Decrypt and store secrets in plaintext again. Requires the current passphrase.")
         .addButton((b) => {
-          b.setButtonText("Disable").setWarning().onClick(async () => {
+          b.setButtonText("Disable").setDestructive().onClick(async () => {
             const pass = await this.askPassphrase("Disable encryption", "Enter current master passphrase");
             if (pass === null) return;
             try {
@@ -115,7 +115,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         );
       new Setting(containerEl)
         .setName("Plaintext warning")
-        .setDesc("Until you enable encryption, your MEGA password is stored in clear text inside this vault. Do not commit the .obsidian folder to a public repository.")
+        .setDesc("Until you enable encryption, your MEGA password is stored in clear text inside this vault. Do not commit the config folder to a public repository.")
         .setDisabled(true);
     }
   }
@@ -129,23 +129,20 @@ export class MegaSyncSettingTab extends PluginSettingTab {
     return new Promise((resolve) => {
       const modal = new Modal(this.app);
       modal.titleEl.setText(title);
-      const row1 = modal.contentEl.createEl("div");
+      const row1 = modal.contentEl.createDiv();
       row1.createEl("label", { text: label });
       const i1 = row1.createEl("input", { type: "password" });
-      i1.style.width = "100%";
-      i1.style.marginTop = "6px";
+      i1.addClass("mega-input-full");
+      i1.addClass("mega-mt-6");
       let i2: HTMLInputElement | null = null;
       if (withConfirm) {
-        const row2 = modal.contentEl.createEl("div");
-        row2.style.marginTop = "10px";
+        const row2 = modal.contentEl.createDiv({ cls: "mega-mt-10" });
         row2.createEl("label", { text: "Confirm passphrase" });
         i2 = row2.createEl("input", { type: "password" });
-        i2.style.width = "100%";
-        i2.style.marginTop = "6px";
+        i2.addClass("mega-input-full");
+        i2.addClass("mega-mt-6");
       }
-      const btnRow = modal.contentEl.createEl("div");
-      btnRow.style.marginTop = "14px";
-      btnRow.style.textAlign = "right";
+      const btnRow = modal.contentEl.createDiv({ cls: "mega-mt-14 mega-text-right" });
       const cancel = btnRow.createEl("button", { text: "Cancel" });
       const ok = btnRow.createEl("button", { text: "OK" });
       ok.classList.add("mod-cta");
@@ -181,7 +178,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderHeader(): void {
     const { containerEl } = this;
-    containerEl.createEl("h2", { text: "MEGA Sync" });
+    new Setting(containerEl).setName("MEGA Sync").setHeading();
     containerEl.createEl("p", {
       text: "Two-way synchronisation between this vault and a folder on your MEGA.nz account. Inspired by Remotely Save, MEGA-only.",
     });
@@ -189,7 +186,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderCredentials(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "MEGA account" });
+    new Setting(containerEl).setName("MEGA account").setHeading();
 
     const s = this.plugin.secrets;
     if (!s) {
@@ -244,7 +241,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderRemoteFolder(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "Remote folder" });
+    new Setting(containerEl).setName("Remote folder").setHeading();
 
     new Setting(containerEl)
       .setName("Base folder")
@@ -267,7 +264,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderSyncTriggers(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "Sync triggers" });
+    new Setting(containerEl).setName("Sync triggers").setHeading();
 
     new Setting(containerEl)
       .setName("Sync on startup")
@@ -319,11 +316,11 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderFilters(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "What to sync" });
+    new Setting(containerEl).setName("What to sync").setHeading();
 
     new Setting(containerEl)
-      .setName("Sync vault config (.obsidian)")
-      .setDesc("Include the .obsidian folder so settings, themes and plugins are mirrored across devices.")
+      .setName("Sync vault config")
+      .setDesc("Include the config folder so settings, themes and plugins are mirrored across devices.")
       .addToggle((t) =>
         t
           .setValue(this.plugin.settings.syncVaultConfig)
@@ -338,7 +335,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.excludePatterns)
           .onChange((v) => this.apply("excludePatterns", v));
         t.inputEl.rows = 6;
-        t.inputEl.style.width = "100%";
+        t.inputEl.addClass("mega-textarea-full");
       });
 
     new Setting(containerEl)
@@ -349,7 +346,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.includePatterns)
           .onChange((v) => this.apply("includePatterns", v));
         t.inputEl.rows = 3;
-        t.inputEl.style.width = "100%";
+        t.inputEl.addClass("mega-textarea-full");
       });
 
     new Setting(containerEl)
@@ -374,7 +371,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderConflict(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "Conflicts & deletion" });
+    new Setting(containerEl).setName("Conflicts & deletion").setHeading();
 
     new Setting(containerEl)
       .setName("Conflict folder")
@@ -397,7 +394,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderUi(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "Interface" });
+    new Setting(containerEl).setName("Interface").setHeading();
 
     new Setting(containerEl)
       .setName("Status bar")
@@ -438,7 +435,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
 
   private renderDanger(): void {
     const { containerEl } = this;
-    containerEl.createEl("h3", { text: "Maintenance" });
+    new Setting(containerEl).setName("Maintenance").setHeading();
 
     new Setting(containerEl)
       .setName("Show sync log")
@@ -453,7 +450,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
       .addButton((b) =>
         b
           .setButtonText("Reset")
-          .setWarning()
+          .setDestructive()
           .onClick(async () => {
             this.plugin.settings.lastSnapshot = undefined;
             await this.plugin.saveSettings();
@@ -467,7 +464,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
       .addButton((b) =>
         b
           .setButtonText("Reset")
-          .setWarning()
+          .setDestructive()
           .onClick(async () => {
             const blob = this.plugin.settings.secretsBlob;
             const enc = this.plugin.settings.secretsEncrypted;
@@ -509,7 +506,7 @@ export class LogModal extends Modal {
     this.modalEl.addClass("mega-sync-log-modal");
     const box = contentEl.createDiv({ cls: "mega-sync-log" });
     for (const line of this.plugin.logger.getLines()) {
-      box.createEl("div", {
+      box.createDiv({
         cls: `log-${line.level}`,
         text: `[${line.stamp}] ${line.text}`,
       });
