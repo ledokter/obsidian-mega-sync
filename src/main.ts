@@ -237,10 +237,18 @@ export class MegaSyncPlugin extends Plugin {
   // ----- UI ---------------------------------------------------------------
 
   addRibbon(): void {
-    this.ribbonEl = this.addRibbonIcon(ICON_ID, "MEGA Sync — sync now", () => {
+    this.ribbonEl = this.addRibbonIcon(ICON_ID, "MEGA Sync — sync now (right-click to stop)", () => {
       void this.startSync(false);
     });
     this.ribbonEl.addClass("mega-sync-ribbon");
+    this.ribbonEl.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      if (this.syncing) {
+        this.stopSync();
+      } else {
+        new Notice("MEGA Sync — no sync is running.", 3000);
+      }
+    });
   }
 
   addStatusBar(): void {
@@ -468,7 +476,7 @@ export class MegaSyncPlugin extends Plugin {
         this.ribbonEl.style.setProperty("--mega-progress", String(total > 0 ? done / total : 0));
         this.ribbonEl.setAttribute(
           "aria-label",
-          `MEGA Sync — ${pct}% (${done}/${total}), ~${formatDuration(etaMs)} left`,
+          `MEGA Sync — ${pct}% (${done}/${total}), ~${formatDuration(etaMs)} left (right-click to stop)`,
         );
       }
     });
@@ -532,7 +540,7 @@ export class MegaSyncPlugin extends Plugin {
       this.lastProgress = undefined;
       this.ribbonEl?.removeClass("syncing");
       this.ribbonEl?.style.removeProperty("--mega-progress");
-      this.ribbonEl?.setAttribute("aria-label", "MEGA Sync — sync now");
+      this.ribbonEl?.setAttribute("aria-label", "MEGA Sync — sync now (right-click to stop)");
     }
   }
 

@@ -251,9 +251,21 @@ export class SyncEngine {
         ops.push(this.remap({ type: "download", path, reason: "new remote file" }, l, r, dir));
         continue;
       }
-      // New on both sides simultaneously -> conflict (keep both).
+      // New on both sides simultaneously (no snapshot entry — e.g. it was
+      // lost, or this is the first sync after connecting an existing remote
+      // folder). If the sizes already match, treat it as already in sync
+      // instead of forcing a needless conflict: remote mtime isn't reliable
+      // enough to compare (MEGA doesn't expose a trustworthy one — see
+      // README), but an exact size match is a solid signal the content is
+      // already the same, which is the common case right after a snapshot
+      // was lost mid-sync. Only genuinely differing sizes get a real
+      // conflict.
       if (l && r && !s) {
-        ops.push(this.remap({ type: "conflict", path, reason: "new on both sides" }, l, r, dir));
+        if (l.size === r.size) {
+          ops.push({ type: "skip", path, reason: "already in sync (no snapshot, size matches)" });
+        } else {
+          ops.push(this.remap({ type: "conflict", path, reason: "new on both sides, content differs" }, l, r, dir));
+        }
         continue;
       }
 
