@@ -148,6 +148,10 @@ export interface MegaSyncSettings {
    *  (e.g. an exhausted MEGA transfer quota). Does not cancel the underlying
    *  network request, just stops the sync loop from waiting on it. */
   opTimeoutMinutes: number;
+  /** On a text-file conflict, try a three-way merge (local/remote diverged
+   *  from a reconstructed common ancestor) before falling back to keeping
+   *  both copies. Only applies when every changed region is non-overlapping. */
+  autoMergeText: boolean;
 
   /** File-type filter mode. `all` syncs every type; `whitelist` syncs only
    *  the extensions selected via the presets + custom list below. Excluded
@@ -230,6 +234,7 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   syncUnderscoreItems: false,
   protectModifyPercentage: 50,
   opTimeoutMinutes: 10,
+  autoMergeText: true,
   fileTypeMode: "all",
   fileTypePresetNotes: false,
   fileTypePresetImages: false,
@@ -268,6 +273,9 @@ export interface SyncResult {
   deletedRemote: number;
   deletedLocal: number;
   conflicts: number;
+  /** Conflicts resolved by an automatic three-way text merge instead of a
+   *  keep-both-copies duplicate. */
+  merged: number;
   skipped: number;
   errors: number;
   durationMs: number;

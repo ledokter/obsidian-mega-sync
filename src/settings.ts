@@ -270,6 +270,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         type: "group",
         heading: "Conflicts & deletion",
         items: [
+          { name: "Auto-merge text conflicts", desc: "On a conflict in a .md/.markdown/.txt file (under 2MB), try a three-way merge before keeping both copies. Only applies when the two versions changed different, non-overlapping parts — genuinely overlapping edits still fall back to keeping both copies.", control: { type: "toggle", key: "autoMergeText" } },
           { name: "Conflict folder", desc: "Name of the local folder where conflict copies are stored.", control: { type: "text", key: "conflictFolder" } },
           { name: "Use trash for deletion", desc: "Move deleted local files to the system trash instead of deleting permanently.", control: { type: "toggle", key: "useTrashForDeletion" } },
           { name: "Max % of files changed per sync", desc: "Abort the sync if more than this % of all files would be modified or deleted in a single run. Safety guard against mass deletions (e.g. a wrongly-empty vault). 0 = always block, 100 = disabled.", control: { type: "number", key: "protectModifyPercentage" } },

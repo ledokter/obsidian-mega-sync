@@ -525,7 +525,7 @@ export class MegaSyncPlugin extends Plugin {
         new Notice(
           `MEGA Sync done — ↑${result.uploaded} ↓${result.downloaded} ` +
             `delR:${result.deletedRemote} delL:${result.deletedLocal} ` +
-            `conflicts:${result.conflicts}`,
+            `conflicts:${result.conflicts} merged:${result.merged}`,
           6000,
         );
       }

@@ -18,7 +18,7 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 - **MEGA account**: email + password + optional 2FA code.
 - Configurable **remote folder** (base folder + sub-folder), auto-created.
 - **Filters**: include/exclude glob patterns, regex ignore + regex allowlist, file-type whitelist with presets (Notes, Images, PDF, Audio, Video) + custom extensions, max file size, optional `.obsidian` folder sync, individual `.obsidian/bookmarks.json` sync, dot/underscore hidden-file rules, always-skipped system files (`.git`, `node_modules`, `.DS_Store`, `~$*` Office temp, …).
-- **Conflict handling**: local + remote conflict copies (`<file>.conflict-<date>.<ext>`), never any data loss.
+- **Conflict handling**: for text notes (`.md`/`.markdown`/`.txt`, under 2MB), tries a three-way merge first — if both sides changed different, non-overlapping parts, the merge is applied automatically and no duplicate is created. Otherwise (or for any other file type), local + remote conflict copies are kept (`<file>.conflict-<date>.<ext>`) — never any data loss. Toggle: "Auto-merge text conflicts".
 - **Safe deletion**: trash-aware, reversible remote/local deletion.
 - **Dry run**: simulate a sync (command "Simulate sync") to preview the plan without changing anything.
 - **Safety guard**: abort automatically if too many files would change in a single run (`protectModifyPercentage`).

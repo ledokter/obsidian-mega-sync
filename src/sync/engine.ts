@@ -11,6 +11,7 @@ import { LocalInventory } from "./local";
 import { Logger } from "../ui/logger";
 import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult, SyncOp, FILE_TYPE_PRESETS } from "./types";
 import { PathFilter } from "./filter";
+import { attemptTextMerge, isMergeableText } from "./textMerge";
 
 const SNAPSHOT_VERSION = 1;
 const MTIME_TOLERANCE_MS = 1500;
@@ -59,6 +60,7 @@ export class SyncEngine {
       deletedRemote: 0,
       deletedLocal: 0,
       conflicts: 0,
+      merged: 0,
       skipped: 0,
       errors: 0,
       durationMs: 0,
@@ -191,7 +193,7 @@ export class SyncEngine {
       `${dry ? "Dry run" : "Sync"} complete in ${(result.durationMs / 1000).toFixed(1)}s — ` +
         `↑${result.uploaded} ↓${result.downloaded} ` +
         `delR:${result.deletedRemote} delL:${result.deletedLocal} ` +
-        `conflicts:${result.conflicts} errors:${result.errors}`,
+        `conflicts:${result.conflicts} merged:${result.merged} errors:${result.errors}`,
     );
     return result;
   }
@@ -483,15 +485,66 @@ export class SyncEngine {
     }
   }
 
-  /** Conflict resolution: keep both files. The remote copy is renamed to a
-   *  `<name>.conflict-<ts>.<ext>` file (so both versions survive on remote),
-   *  then the local version is uploaded. The local file keeps its name. */
+  /** Try a three-way text merge before falling back to keep-both. Returns
+   *  true if it applied a clean merge (both L, R and the remote/local files
+   *  now hold the merged content) — the caller should stop there. */
+  private async tryAutoMerge(
+    path: string,
+    local: FileEntry,
+    remote: RemoteFile,
+    L: Map<string, FileEntry>,
+    R: Map<string, RemoteFile>,
+    result: SyncResult,
+  ): Promise<boolean> {
+    if (!this.settings.autoMergeText) return false;
+    if (!isMergeableText(path, Math.max(local.size, remote.size))) return false;
+
+    const localText = new TextDecoder("utf-8").decode(await this.local.read(path));
+    const remoteText = new TextDecoder("utf-8").decode(await this.mega.download(path));
+    const { merged, clean } = attemptTextMerge(localText, remoteText);
+    if (!clean) return false;
+
+    if (merged === localText && merged === remoteText) {
+      // Already identical once decoded (e.g. line-ending difference only,
+      // sizes just happened to differ) — nothing to write.
+      result.merged++;
+      this.logger.ok(`⇄ "${path}" — already equivalent, no write needed.`);
+      return true;
+    }
+
+    const encoded = new TextEncoder().encode(merged);
+    const ab = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer;
+    const now = Date.now();
+    await this.local.write(path, ab, now);
+    const remoteEntry = await this.mega.upload(path, Buffer.from(encoded));
+    L.set(path, { path, mtime: now, size: encoded.length });
+    R.set(path, remoteEntry);
+    result.merged++;
+    this.logger.ok(`⇄ Auto-merged "${path}" (non-overlapping changes on both sides).`);
+    return true;
+  }
+
+  /** Conflict resolution: try an automatic text merge first (see
+   *  tryAutoMerge); otherwise keep both files. The remote copy is renamed to
+   *  a `<name>.conflict-<ts>.<ext>` file (so both versions survive on
+   *  remote), then the local version is uploaded. The local file keeps its
+   *  name. */
   private async resolveConflict(
     path: string,
     L: Map<string, FileEntry>,
     R: Map<string, RemoteFile>,
     result: SyncResult,
   ): Promise<void> {
+    const localEntry = L.get(path);
+    const remoteEntry = R.get(path);
+    if (localEntry && remoteEntry) {
+      try {
+        if (await this.tryAutoMerge(path, localEntry, remoteEntry, L, R, result)) return;
+      } catch (e) {
+        this.logger.warn(`Auto-merge failed for "${path}", keeping both copies instead: ${String(e)}`);
+      }
+    }
+
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const dot = path.lastIndexOf(".");
     const base = dot > 0 ? path.slice(0, dot) : path;
