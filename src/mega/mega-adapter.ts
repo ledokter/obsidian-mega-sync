@@ -326,7 +326,12 @@ export class MegaAdapter {
   async close(): Promise<void> {
     if (this.storage) {
       try {
-        await this.storage.close();
+        // NOT `storage.close()`: that one sends an `sml` (logout) request,
+        // which invalidates the sid server-side — the session we just cached
+        // would then be rejected with ESID (-15) on the next sync. Tear down
+        // the API channel only, and keep the session alive for reuse.
+        this.storage.api.close();
+        this.storage.status = "closed";
       } catch {
         /* ignore */
       }
