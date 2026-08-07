@@ -134,7 +134,7 @@ export class MegaSyncPlugin extends Plugin {
     ) {
       try {
         this.passphrase = this.settings.settingsPassword;
-        this.enableEncryptionInternal(this.passphrase);
+        await this.enableEncryptionInternal(this.passphrase);
         await this.saveSettings();
         this.logger.ok("Migrated legacy settings password to encrypted secrets.");
       } catch (e) {
@@ -150,9 +150,9 @@ export class MegaSyncPlugin extends Plugin {
 
   /** Encrypt the current in-memory secrets with `passphrase` and clear the
    *  plaintext fields from the settings object. Caller must saveSettings(). */
-  private enableEncryptionInternal(passphrase: string): void {
+  private async enableEncryptionInternal(passphrase: string): Promise<void> {
     if (!this.secrets) throw new Error("No secrets to encrypt — set credentials first.");
-    this.settings.secretsBlob = encryptSecrets(this.secrets, passphrase);
+    this.settings.secretsBlob = await encryptSecrets(this.secrets, passphrase);
     this.settings.secretsEncrypted = true;
     this.settings.email = "";
     this.settings.password = "";
@@ -168,7 +168,7 @@ export class MegaSyncPlugin extends Plugin {
     if (!this.secrets || (!this.secrets.email && !this.secrets.password && !this.secrets.session)) {
       throw new Error("Enter your MEGA credentials before enabling encryption.");
     }
-    this.enableEncryptionInternal(passphrase);
+    await this.enableEncryptionInternal(passphrase);
     await this.saveSettings();
   }
 
@@ -177,7 +177,7 @@ export class MegaSyncPlugin extends Plugin {
     if (!this.settings.secretsEncrypted || !this.settings.secretsBlob) {
       throw new Error("Secrets are not encrypted.");
     }
-    const s = decryptSecrets(this.settings.secretsBlob, passphrase);
+    const s = await decryptSecrets(this.settings.secretsBlob, passphrase);
     this.secrets = s;
     this.passphrase = passphrase;
   }
@@ -213,7 +213,7 @@ export class MegaSyncPlugin extends Plugin {
         this.logger.warn("Secrets changed but no passphrase in memory — not re-encrypting.");
         return;
       }
-      this.settings.secretsBlob = encryptSecrets(this.secrets, this.passphrase);
+      this.settings.secretsBlob = await encryptSecrets(this.secrets, this.passphrase);
     } else {
       this.settings.email = this.secrets.email;
       this.settings.password = this.secrets.password;
@@ -439,6 +439,19 @@ export class MegaSyncPlugin extends Plugin {
       this.settings.lastSnapshot = (await mega.readSnapshot()) ?? this.settings.lastSnapshot;
       await this.saveSettings();
       await this.logger.flushFile();
+
+      // Auto-bootstrap: the first sync into an empty vault downloaded
+      // everything from MEGA. Mark bootstrapped and switch to two-way sync.
+      if (result.bootstrapped) {
+        this.settings.bootstrapped = true;
+        this.settings.syncDirection = "two-way";
+        await this.saveSettings();
+        new Notice(
+          "MEGA Sync — bootstrap complete: vault downloaded. Two-way sync enabled for next syncs.",
+          8000,
+        );
+        this.logger.ok("Bootstrap complete — switched to two-way sync.");
+      }
 
       this.setStatus(
         `synced ${new Date().toLocaleTimeString()} (↑${result.uploaded} ↓${result.downloaded})`,

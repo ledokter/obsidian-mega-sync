@@ -1,10 +1,10 @@
 {
   "id": "mega-sync",
   "name": "MEGA Sync",
-  "version": "1.2.2",
+  "version": "2.0.0",
   "minAppVersion": "1.13.0",
   "description": "Two-way sync between your vault and your MEGA.nz cloud.",
   "author": "ledokter",
   "authorUrl": "https://github.com/ledokter",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }

@@ -218,6 +218,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
               },
             },
           },
+          { name: "Auto bootstrap empty vault", desc: "On a device with an empty vault, the first sync downloads everything from MEGA (one-way), then automatically switches back to two-way sync. Runs only once per vault.", control: { type: "toggle", key: "autoBootstrapEmptyVault" } },
           { name: "Notify before sync", desc: "Show a brief on-screen notice when a sync (manual or automatic) starts.", control: { type: "toggle", key: "notifyBeforeSync" } },
           { name: "Confirm before manual sync", desc: "Show a confirmation modal before MANUAL syncs only. Automatic syncs (startup / interval / debounced) are never blocked.", control: { type: "toggle", key: "confirmManualSync" } },
           { name: "Sync on startup", desc: "Start a sync automatically when Obsidian opens. Requires unlocking the master passphrase (or no encryption).", control: { type: "toggle", key: "syncOnStartup" } },

@@ -54,6 +54,7 @@ export class SyncEngine {
       skipped: 0,
       errors: 0,
       durationMs: 0,
+      bootstrapped: false,
     };
 
     await this.mega.connect();
@@ -87,8 +88,25 @@ export class SyncEngine {
     }
     const snapshot: SyncSnapshot = S ?? { v: SNAPSHOT_VERSION, savedAt: 0, files: {} };
 
+    // Auto-bootstrap: empty local vault + non-empty remote + no prior
+    // snapshot -> force a download-only first sync so the vault is populated
+    // from MEGA. The caller switches to two-way afterwards.
+    const emptyLocal = L.size === 0;
+    const hasRemote = R.size > 0;
+    const noSnapshot = Object.keys(snapshot.files).length === 0;
+    const bootstrap = !!this.settings.autoBootstrapEmptyVault
+      && !this.settings.bootstrapped
+      && emptyLocal && hasRemote && noSnapshot;
+    const effectiveDir = bootstrap ? "download-only" : this.settings.syncDirection;
+    if (bootstrap) {
+      result.bootstrapped = true;
+      this.logger.info(
+        "First sync: local vault is empty and MEGA has files — bootstrapping (download-only). Two-way sync will resume afterwards.",
+      );
+    }
+
     // Compute the plan.
-    const plan = this.plan(L, R, snapshot.files, this.settings.syncDirection);
+    const plan = this.plan(L, R, snapshot.files, effectiveDir);
     const counts = {
       up: plan.filter((o) => o.type === "upload").length,
       down: plan.filter((o) => o.type === "download").length,
@@ -107,8 +125,10 @@ export class SyncEngine {
       }
     }
 
-    // Safety guard: abort if too many files would change in one run.
-    if (!dry) {
+    // Safety guard: abort if too many files would change in one run. A
+    // bootstrap is exempt: the vault is empty, every op is a local creation,
+    // so nothing can be lost.
+    if (!dry && !bootstrap) {
       this.guardModifyPercentage(plan, L, R);
     }
 

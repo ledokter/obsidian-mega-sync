@@ -14,11 +14,12 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
 | `manifest.json` complete & compliant | ✅ (id `mega-sync`, no `obsidian` in id, no `fundingUrl`) |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.2.2 |
-| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.2.2` on `master`) |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/2.0.0 |
+| `manifest.json` at HEAD of default branch matches latest release | ✅ (`2.0.0` on `master`) |
 | `versions.json` present | ✅ |
 | README + LICENSE | ✅ |
-| At-rest encryption (AES-256-GCM + scrypt) | ✅ |
+| At-rest encryption (AES-256-GCM + scrypt, Web Crypto) | ✅ |
+| Mobile support (browser bundle, experimental) | ✅ |
 | MEGA session caching (no password re-sent) | ✅ |
 | Submitted via community.obsidian.md | ⏳ **manual step below** |
 | Accepted & published | ⏳ pending review |
@@ -38,9 +39,9 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 6. Click **Submit**.
 
 The directory reads the `manifest.json` at the HEAD of `master` (currently
-`1.2.2`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
+`2.0.0`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
 GitHub release whose tag matches the manifest version — that release
-(`1.2.2`) is produced automatically by the `release` GitHub Actions workflow,
+(`2.0.0`) is produced automatically by the `release` GitHub Actions workflow,
 which also attests build provenance for the assets.
 
 ## After submission
@@ -69,24 +70,28 @@ Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plug
       (Obsidian, MEGA.nz).
 - [x] `minAppVersion` = `1.13.0` (uses the declarative settings API:
       `getSettingDefinitions` / `SettingDefinitionItem`, available since 1.13.0).
-- [x] `isDesktopOnly: true` — the plugin uses Node.js APIs (`crypto`, `Buffer`)
-      via the bundled `megajs` library, which are desktop-only.
+- [x] `isDesktopOnly: false` — the plugin is bundled for the browser and uses no
+      Node.js built-in module at runtime: MEGA's client-side encryption comes
+      from the `megajs` browser build, at-rest encryption uses the Web Crypto
+      API + WASM scrypt, and `Buffer` is provided by a bundled polyfill.
 - [x] Command ids do **not** include the plugin id (`sync-now`, `show-log`,
       `test-connection`, `lock`) — Obsidian prefixes them automatically.
 - [x] No sample/template code; original implementation.
 - [x] No remote code loading; not obfuscated; full TypeScript source in the repo.
-- [x] **Filesystem access is justified**: the plugin is `isDesktopOnly: true` and uses
-      Node.js `crypto`/`Buffer` only through the bundled `megajs` library (MEGA's
-      protocol requires client-side encryption, handled in pure-JS by megajs).
-      File access is limited to the Obsidian vault and the plugin's own data
-      folder; the only out-of-vault operation is sending deleted files to the
-      system trash via Obsidian's `fileManager.trashFile` API (optional). See
-      the "Security & filesystem access" section in README.md.
-- [x] GitHub release `1.2.2` attaches `main.js`, `manifest.json`, `styles.css`,
+- [x] **Filesystem access is justified**: file access goes through Obsidian's
+      vault API and is limited to the vault and the plugin's own data folder;
+      the only out-of-vault operation is sending deleted files to the system
+      trash via Obsidian's `fileManager.trashFile` API (optional). See the
+      "Security & filesystem access" section in README.md.
+- [x] GitHub release `2.0.0` attaches `main.js`, `manifest.json`, `styles.css`,
       with build-provenance attestations.
-- [x] Release tag (`1.2.2`) matches `manifest.json` version (`1.2.2`).
+- [x] Release tag (`2.0.0`) matches `manifest.json` version (`2.0.0`).
 
-## Features (1.2.2)
+## Features (2.0.0)
+
+- Mobile support (experimental): browser bundle, no Node.js built-ins.
+- Auto bootstrap: on a device with an empty vault, the first sync downloads
+  everything from MEGA one-way, then switches back to two-way automatically.
 
 - Sync direction: two-way mirror (default), upload-only / download-only (strict
   mirror), or push-only / pull-only (one-way without deletions).

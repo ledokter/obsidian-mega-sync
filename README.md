@@ -13,6 +13,8 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 - **Two-way sync** via a three-way merge (local / remote / last-sync snapshot).
 - **Sync direction**: two-way (mirror), upload-only / download-only (strict mirror), or push-only / pull-only (one-way without deletions).
 - **Triggers**: on startup, on an interval, after vault changes (debounced), manually (ribbon / command / status bar).
+- **Auto bootstrap**: on a device with an empty vault, the first sync downloads everything from MEGA (one-way), then switches back to two-way automatically.
+- **Mobile (experimental)**: the plugin also runs on iOS/Android — see [Mobile](#mobile-experimental).
 - **MEGA account**: email + password + optional 2FA code.
 - Configurable **remote folder** (base folder + sub-folder), auto-created.
 - **Filters**: include/exclude glob patterns, regex ignore + regex allowlist, file-type whitelist with presets (Notes, Images, PDF, Audio, Video) + custom extensions, max file size, optional `.obsidian` folder sync, individual `.obsidian/bookmarks.json` sync, dot/underscore hidden-file rules, always-skipped system files (`.git`, `node_modules`, `.DS_Store`, `~$*` Office temp, …).
@@ -43,9 +45,9 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 
 ## Security & filesystem access
 
-- The plugin is **desktop only** (`isDesktopOnly: true`). The [`megajs`](https://www.npmjs.com/package/megajs) library used to talk to MEGA relies on Node.js `crypto` and `Buffer` (MEGA's protocol requires client-side encryption, handled in pure-JS by megajs). Filesystem access is limited to the **Obsidian vault** and the **plugin's own data folder** — the plugin never reads or writes outside these bounds, except to send deleted files to the system trash via Obsidian's `fileManager.trashFile` API (optional, "Use trash for deletion"). No remote code is loaded; the full TypeScript source is published.
+- The plugin runs on **desktop and mobile** (`isDesktopOnly: false`). It is bundled for the browser: the [`megajs`](https://www.npmjs.com/package/megajs) browser build handles MEGA's client-side encryption in pure JS, `Buffer` is provided by a bundled polyfill, and no Node.js built-in module is used at runtime. Filesystem access is limited to the **Obsidian vault** and the **plugin's own data folder** — the plugin never reads or writes outside these bounds, except to send deleted files to the system trash via Obsidian's `fileManager.trashFile` API (optional, "Use trash for deletion"). No remote code is loaded; the full TypeScript source is published.
 - Your MEGA password is stored **locally** in the plugin's `data.json` (inside your vault's `.obsidian/plugins/mega-sync/`). It is only ever sent to the MEGA API.
-- **At-rest encryption**: Settings → Security → "Enable encryption". Your MEGA credentials (email, password, 2FA) **and** the cached session are then encrypted with **AES-256-GCM** (key derived via **scrypt** from a master passphrase). The passphrase is **never** written to disk — it lives only in memory for the session. Once set, it also locks the settings panel.
+- **At-rest encryption**: Settings → Security → "Enable encryption". Your MEGA credentials (email, password, 2FA) **and** the cached session are then encrypted with **AES-256-GCM** (key derived via **scrypt**, N=16384/r=8/p=1, from a master passphrase). Encryption uses the **Web Crypto API** and a WASM scrypt implementation, so it works identically on desktop and mobile; secrets encrypted by earlier versions stay readable. The passphrase is **never** written to disk — it lives only in memory for the session. Once set, it also locks the settings panel.
 - **Session persistence**: after a first successful login, the plugin caches the MEGA session (`sid` + key, no password). Subsequent syncs reuse that session and no longer send your password to MEGA. If the session expires, the plugin automatically falls back to email+password login.
 - The plugin loads **no remote code** and is **not obfuscated**, per Obsidian's plugin requirements.
 - Do not commit `data.json` to a public repository.
@@ -53,7 +55,21 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 ## Limitations
 
 - MEGA does not expose a reliable per-file modification time; the plugin relies on the sync snapshot to track `mtime`. A file created directly on MEGA (outside the plugin) is seen as "new remote" and downloaded.
-- Mobile (iOS/Android) is not supported yet — the plugin is desktop only for now.
+- Mobile support is **experimental** — see below.
+
+## Mobile (experimental)
+
+The plugin installs and runs on Obsidian for iOS and Android. Login, folder listing and the settings UI work the same as on desktop.
+
+**Caveat**: MEGA's file-transfer servers negotiate TLS with cipher suites that some mobile webviews refuse. If that happens on your device, uploads and downloads fail while login and listing still work. This cannot be worked around from the plugin — please open an issue with your OS/version if you hit it.
+
+**Recommended first run on a new phone/tablet:**
+
+1. Create an empty vault, install the plugin, enter your MEGA credentials.
+2. Leave **Auto bootstrap empty vault** on (default).
+3. Run a sync: the vault is empty and MEGA has files, so this first run downloads everything one-way. When it finishes, the plugin switches to two-way sync by itself and never bootstraps again for that vault.
+
+Turn the toggle off if you prefer to control the first sync direction manually.
 
 ## Contributions
 

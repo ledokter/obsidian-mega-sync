@@ -1,11 +1,13 @@
 import esbuild from "esbuild";
 import process from "process";
 
-// Node builtins kept external (provided by Electron at runtime). Inlined
-// here to avoid the (deprecated) `builtin-modules` dependency.
+// Node builtins kept external (not imported by our code or by the megajs
+// browser build; listed so esbuild never tries to bundle them). `buffer` and
+// `crypto` are intentionally NOT here: `buffer` is polyfilled via inject, and
+// `crypto` is no longer used (crypto.ts now uses the Web Crypto API).
 const builtins = [
-  "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
-  "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
+  "assert", "async_hooks", "child_process", "cluster", "console",
+  "constants", "dgram", "diagnostics_channel", "dns", "domain",
   "events", "fs", "http", "http2", "https", "inspector", "module", "net",
   "os", "path", "perf_hooks", "process", "punycode", "querystring", "readline",
   "repl", "stream", "string_decoder", "sys", "timers", "tls", "trace_events",
@@ -41,7 +43,8 @@ const commonOptions = {
   ],
   format: "cjs",
   target: "es2020",
-  platform: "node",
+  platform: "browser",
+  inject: ["buffer-inject.mjs"],
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,

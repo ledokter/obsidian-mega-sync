@@ -181,6 +181,13 @@ export interface MegaSyncSettings {
   /** Confirm before deleting local files. */
   confirmLocalDeletion: boolean;
 
+  /** On a device with an empty vault, the first sync downloads everything
+   *  from MEGA (one-way) then automatically switches to two-way sync. */
+  autoBootstrapEmptyVault: boolean;
+  /** Persisted flag: this vault has already been bootstrapped (downloaded the
+   *  initial copy from MEGA). Prevents the bootstrap from re-triggering. */
+  bootstrapped: boolean;
+
   /** Last snapshot kept locally for resync. */
   lastSnapshot?: SyncSnapshot;
 }
@@ -232,6 +239,8 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   conflictFolder: ".mega-sync-conflicts",
   useTrashForDeletion: true,
   confirmLocalDeletion: true,
+  autoBootstrapEmptyVault: true,
+  bootstrapped: false,
 };
 
 /** Whitelist presets for the file-type filter. The keys match the boolean
@@ -256,4 +265,7 @@ export interface SyncResult {
   skipped: number;
   errors: number;
   durationMs: number;
+  /** True if this run was an auto-bootstrap (first download into an empty
+   *  vault). The caller flips `bootstrapped` and switches to two-way. */
+  bootstrapped: boolean;
 }
