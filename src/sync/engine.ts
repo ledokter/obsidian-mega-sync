@@ -12,6 +12,7 @@ import { Logger } from "../ui/logger";
 import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult, SyncOp, FILE_TYPE_PRESETS } from "./types";
 import { PathFilter } from "./filter";
 import { attemptTextMerge, isMergeableText } from "./textMerge";
+import { MergeCache } from "./mergeCache";
 
 const SNAPSHOT_VERSION = 1;
 const MTIME_TOLERANCE_MS = 1500;
@@ -24,18 +25,21 @@ export class SyncEngine {
   private logger: Logger;
   private progress?: (done: number, total: number, label: string) => void;
   private aborted = false;
+  private mergeCache: MergeCache;
 
   constructor(
     app: App,
     settings: MegaSyncSettings,
     mega: MegaAdapter,
     logger: Logger,
+    pluginDir: string,
   ) {
     this.app = app;
     this.settings = settings;
     this.mega = mega;
     this.logger = logger;
     this.local = new LocalInventory(app, settings);
+    this.mergeCache = new MergeCache(app, pluginDir);
   }
 
   setProgress(fn: (done: number, total: number, label: string) => void): void {
@@ -440,6 +444,9 @@ export class SyncEngine {
         R.set(path, remote);
         result.uploaded++;
         this.logger.ok(`↑ ${path}`);
+        if (isMergeableText(path, buf.byteLength)) {
+          await this.mergeCache.set(path, new TextDecoder("utf-8").decode(buf));
+        }
         break;
       }
       case "download": {
@@ -453,6 +460,9 @@ export class SyncEngine {
         });
         result.downloaded++;
         this.logger.ok(`↓ ${path}`);
+        if (isMergeableText(path, buf.length)) {
+          await this.mergeCache.set(path, new TextDecoder("utf-8").decode(buf));
+        }
         break;
       }
       case "deleteRemote": {
@@ -460,6 +470,7 @@ export class SyncEngine {
         R.delete(path);
         result.deletedRemote++;
         this.logger.ok(`×R ${path}`);
+        await this.mergeCache.remove(path);
         break;
       }
       case "deleteLocal": {
@@ -467,6 +478,7 @@ export class SyncEngine {
         L.delete(path);
         result.deletedLocal++;
         this.logger.ok(`×L ${path}`);
+        await this.mergeCache.remove(path);
         break;
       }
       case "conflict": {
@@ -501,7 +513,11 @@ export class SyncEngine {
 
     const localText = new TextDecoder("utf-8").decode(await this.local.read(path));
     const remoteText = new TextDecoder("utf-8").decode(await this.mega.download(path));
-    const { merged, clean } = attemptTextMerge(localText, remoteText);
+    // A real last-synced ancestor (when cached) makes the merge far more
+    // accurate than the LCS-reconstructed fallback — no need to guess what
+    // the two sides diverged from when we actually know.
+    const ancestor = await this.mergeCache.get(path);
+    const { merged, clean } = attemptTextMerge(localText, remoteText, ancestor);
     if (!clean) return false;
 
     if (merged === localText && merged === remoteText) {
@@ -509,6 +525,7 @@ export class SyncEngine {
       // sizes just happened to differ) — nothing to write.
       result.merged++;
       this.logger.ok(`⇄ "${path}" — already equivalent, no write needed.`);
+      await this.mergeCache.set(path, merged);
       return true;
     }
 
@@ -520,7 +537,8 @@ export class SyncEngine {
     L.set(path, { path, mtime: now, size: encoded.length });
     R.set(path, remoteEntry);
     result.merged++;
-    this.logger.ok(`⇄ Auto-merged "${path}" (non-overlapping changes on both sides).`);
+    this.logger.ok(`⇄ Auto-merged "${path}" (non-overlapping changes on both sides)${ancestor ? "" : " [no cached ancestor — used a reconstructed one]"}.`);
+    await this.mergeCache.set(path, merged);
     return true;
   }
 

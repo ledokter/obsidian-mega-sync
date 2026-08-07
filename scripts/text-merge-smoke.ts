@@ -58,6 +58,17 @@ console.log("4) One side unchanged, other appended -> clean, keeps the addition"
   check(merged.includes("line4 appended remotely"), "keeps the remote addition");
 }
 
+console.log("5) A real known ancestor resolves the case the LCS fallback was conservative about");
+{
+  const ancestor = "# Title\n\nIntro.\n\n## Section A\nOriginal A.\n\n## Section B\nOriginal B.\n";
+  const local = "# Title\n\nIntro.\n\n## Section A\nLocal addition here.\n\n## Section B\nOriginal B.\n";
+  const remote = "# Title\n\nIntro.\n\n## Section A\nOriginal A.\n\n## Section B\nRemote addition here.\n";
+  const { merged, clean } = attemptTextMerge(local, remote, ancestor);
+  check(clean, "clean merge with a real ancestor (same inputs as test 1, which had no ancestor)");
+  check(merged.includes("Local addition here."), "keeps local's change to section A");
+  check(merged.includes("Remote addition here."), "keeps remote's change to section B");
+}
+
 if (failures === 0) {
   console.log("\nALL TEXT-MERGE TESTS PASSED ✅");
   process.exit(0);

@@ -43,9 +43,13 @@ export interface MergeAttempt {
   clean: boolean;
 }
 
-export function attemptTextMerge(local: string, remote: string): MergeAttempt {
+/** `knownAncestor`, when available (see mergeCache.ts), is the real last-
+ *  synced content — a far more accurate merge base than the reconstructed
+ *  one, which is only a fallback for a file that has never gone through a
+ *  clean sync since the cache existed. */
+export function attemptTextMerge(local: string, remote: string, knownAncestor?: string | null): MergeAttempt {
   if (local === remote) return { merged: local, clean: true };
-  const ancestor = lcsText(local, remote);
+  const ancestor = knownAncestor ?? lcsText(local, remote);
   const res = merge(local, ancestor, remote, { stringSeparator: "\n" });
   return { merged: res.result.join("\n"), clean: !res.conflict };
 }

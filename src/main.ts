@@ -389,6 +389,10 @@ export class MegaSyncPlugin extends Plugin {
     });
   }
 
+  private buildEngine(mega: MegaAdapter): SyncEngine {
+    return new SyncEngine(this.app, this.settings, mega, this.logger, this.manifest.dir ?? ".obsidian/plugins/mega-sync");
+  }
+
   /** Confirmation modal shown before manual syncs when enabled. */
   private confirmSync(): Promise<boolean> {
     return new Promise((resolve) => {
@@ -461,7 +465,7 @@ export class MegaSyncPlugin extends Plugin {
     this.syncStartedAt = Date.now();
     this.lastProgress = undefined;
     const mega = this.buildAdapter();
-    const engine = new SyncEngine(this.app, this.settings, mega, this.logger);
+    const engine = this.buildEngine(mega);
     this.currentEngine = engine;
     engine.setProgress((done, total, label) => {
       const elapsed = Date.now() - this.syncStartedAt;
@@ -561,7 +565,7 @@ export class MegaSyncPlugin extends Plugin {
     }
     new Notice(`MEGA Sync — dry run (${directionLabel(this.settings.syncDirection)})…`, 3000);
     const mega = this.buildAdapter();
-    const engine = new SyncEngine(this.app, this.settings, mega, this.logger);
+    const engine = this.buildEngine(mega);
     try {
       const result = await engine.run(true);
       new Notice(
