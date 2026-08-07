@@ -14,6 +14,7 @@ export class Logger {
   private buffer: LogLine[] = [];
   private max: number;
   private keepFile: boolean;
+  private enabled: boolean;
   private plugin: { loadData: () => Promise<any>; saveData: (d: any) => Promise<void> };
   private fileLog: string[] = [];
   private onNotice?: (msg: string, timeout?: number) => void;
@@ -25,11 +26,13 @@ export class Logger {
     this.plugin = plugin;
     this.max = settings.logLines;
     this.keepFile = settings.keepLogFile;
+    this.enabled = settings.enableLogging;
   }
 
   configure(settings: MegaSyncSettings): void {
     this.max = settings.logLines;
     this.keepFile = settings.keepLogFile;
+    this.enabled = settings.enableLogging;
   }
 
   setNoticeHandler(fn: (msg: string, timeout?: number) => void): void {
@@ -37,6 +40,7 @@ export class Logger {
   }
 
   log(level: LogLevel, msg: string): void {
+    if (!this.enabled) return;
     const line: LogLine = { level, text: msg, stamp: nowStamp() };
     this.buffer.push(line);
     if (this.buffer.length > this.max) this.buffer.shift();

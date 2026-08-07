@@ -14,8 +14,8 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
 | `manifest.json` complete & compliant | ✅ (id `mega-sync`, no `obsidian` in id, no `fundingUrl`) |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.1.1 |
-| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.1.1` on `master`) |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.2.0 |
+| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.2.0` on `master`) |
 | `versions.json` present | ✅ |
 | README + LICENSE | ✅ |
 | At-rest encryption (AES-256-GCM + scrypt) | ✅ |
@@ -38,9 +38,10 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 6. Click **Submit**.
 
 The directory reads the `manifest.json` at the HEAD of `master` (currently
-`1.1.1`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
+`1.2.0`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
 GitHub release whose tag matches the manifest version — that release
-(`1.1.1`) already exists with all three assets.
+(`1.2.0`) is produced automatically by the `release` GitHub Actions workflow,
+which also attests build provenance for the assets.
 
 ## After submission
 
@@ -66,15 +67,27 @@ Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plug
 - [x] No `fundingUrl` (no donation channel is configured).
 - [x] `description` ≤ 250 chars, ends with `.`, no emoji, proper capitalization
       (Obsidian, MEGA.nz, Remotely Save).
-- [x] `minAppVersion` = `1.5.0` (a real Obsidian API version).
+- [x] `minAppVersion` = `1.13.0` (uses the declarative settings API:
+      `getSettingDefinitions` / `SettingDefinitionItem`, available since 1.13.0).
 - [x] `isDesktopOnly: true` — the plugin uses Node.js APIs (`crypto`, `Buffer`)
       via the bundled `megajs` library, which are desktop-only.
 - [x] Command ids do **not** include the plugin id (`sync-now`, `show-log`,
       `test-connection`, `lock`) — Obsidian prefixes them automatically.
 - [x] No sample/template code; original implementation.
 - [x] No remote code loading; not obfuscated; full TypeScript source in the repo.
-- [x] GitHub release `1.1.1` attaches `main.js`, `manifest.json`, `styles.css`.
-- [x] Release tag (`1.1.1`) matches `manifest.json` version (`1.1.1`).
+- [x] GitHub release `1.2.0` attaches `main.js`, `manifest.json`, `styles.css`,
+      with build-provenance attestations.
+- [x] Release tag (`1.2.0`) matches `manifest.json` version (`1.2.0`).
+
+## Features (1.2.0)
+
+- Sync direction: two-way mirror (default), upload-only, or download-only
+  (strict mirror — source-side deletions propagate to the target).
+- Pre-sync notification + optional confirmation modal for manual syncs.
+- Round-trip "Test read/write" button (write → read → verify → delete).
+- File-type filter: all types, or a whitelist with presets (Notes, Images,
+  PDF, Audio, Video) + custom extensions. Excluded files are left untouched.
+- Toggleable sync log (in-memory ring buffer + optional on-disk file).
 
 ## Manual test before review
 

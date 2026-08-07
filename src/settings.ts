@@ -7,7 +7,7 @@
 // because they need masked inputs / modals not expressible as plain controls.
 import { App, PluginSettingTab, Setting, Modal, Notice, SettingDefinitionItem } from "obsidian";
 import { MegaSyncPlugin } from "./main";
-import { DEFAULT_SETTINGS } from "./sync/types";
+import { DEFAULT_SETTINGS, FILE_TYPE_PRESETS } from "./sync/types";
 
 const CRED_KEYS = ["email", "secondFactorCode"] as const;
 type CredKey = (typeof CRED_KEYS)[number];
@@ -172,8 +172,8 @@ export class MegaSyncSettingTab extends PluginSettingTab {
             control: { type: "text", key: "secondFactorCode", placeholder: "123456" },
           },
           {
-            name: "Test connection",
-            desc: "Connect to MEGA and list the base folder to verify the credentials.",
+            name: "Test read/write",
+            desc: "Connect to MEGA, write a small test file, read it back, verify it, then delete it. Validates the full upload/download/delete path.",
             visible: () => !locked,
             action: () => { void this.plugin.testConnection(); },
           },
@@ -203,6 +203,21 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         type: "group",
         heading: "Sync triggers",
         items: [
+          {
+            name: "Sync direction",
+            desc: "Two-way mirrors both sides. Upload-only makes MEGA an exact copy of the local vault (local deletions are propagated to MEGA; conflicts overwrite MEGA). Download-only makes the local vault an exact copy of MEGA (remote deletions are propagated locally; conflicts overwrite local). One-way modes can delete files on the target side.",
+            control: {
+              type: "dropdown",
+              key: "syncDirection",
+              options: {
+                "two-way": "Two-way (mirror both sides)",
+                "upload-only": "Upload only (local → MEGA)",
+                "download-only": "Download only (MEGA → local)",
+              },
+            },
+          },
+          { name: "Notify before sync", desc: "Show a brief on-screen notice when a sync (manual or automatic) starts.", control: { type: "toggle", key: "notifyBeforeSync" } },
+          { name: "Confirm before manual sync", desc: "Show a confirmation modal before MANUAL syncs only. Automatic syncs (startup / interval / debounced) are never blocked.", control: { type: "toggle", key: "confirmManualSync" } },
           { name: "Sync on startup", desc: "Start a sync automatically when Obsidian opens. Requires unlocking the master passphrase (or no encryption).", control: { type: "toggle", key: "syncOnStartup" } },
           { name: "Auto-sync interval", desc: "Sync every N minutes while Obsidian is open. 0 disables.", control: { type: "number", key: "syncIntervalMinutes" } },
           { name: "Sync after changes", desc: "Start a debounced sync shortly after the vault changes.", control: { type: "toggle", key: "syncOnSave" } },
@@ -216,6 +231,24 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         type: "group",
         heading: "What to sync",
         items: [
+          {
+            name: "File types",
+            desc: "Sync all file types, or only the extensions selected below. Excluded files are left untouched on both sides (not deleted).",
+            control: {
+              type: "dropdown",
+              key: "fileTypeMode",
+              options: {
+                "all": "All file types",
+                "whitelist": "Only selected types",
+              },
+            },
+          },
+          { name: "Notes", desc: `Sync notes: ${FILE_TYPE_PRESETS.notes.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetNotes" } },
+          { name: "Images", desc: `Sync images: ${FILE_TYPE_PRESETS.images.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetImages" } },
+          { name: "PDF", desc: `Sync PDF: ${FILE_TYPE_PRESETS.pdf.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetPdf" } },
+          { name: "Audio", desc: `Sync audio: ${FILE_TYPE_PRESETS.audio.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetAudio" } },
+          { name: "Video", desc: `Sync video: ${FILE_TYPE_PRESETS.video.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetVideo" } },
+          { name: "Custom extensions", desc: "Extra extensions (comma or space separated, no dot) to sync in addition to the presets above. e.g. docx, xlsx, epub", visible: () => s.fileTypeMode === "whitelist", control: { type: "text", key: "fileTypeCustomExt", placeholder: "docx, xlsx, epub" } },
           { name: "Sync vault config", desc: "Include the config folder so settings, themes and plugins are mirrored across devices.", control: { type: "toggle", key: "syncVaultConfig" } },
           { name: "Exclude patterns", desc: "Glob patterns (one per line) of paths to exclude. Supports * and **. e.g. .trash/** or *.tmp", control: { type: "textarea", key: "excludePatterns" } },
           { name: "Include patterns (override)", desc: "Paths matching these patterns are synced even if excluded above.", control: { type: "textarea", key: "includePatterns" } },
@@ -241,7 +274,8 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         items: [
           { name: "Status bar", desc: "Show a sync status item in the status bar.", control: { type: "toggle", key: "showStatusBar" } },
           { name: "Ribbon icon", desc: "Show a sync button in the left ribbon.", control: { type: "toggle", key: "showRibbon" } },
-          { name: "Keep log file", desc: "Keep a ring-buffered log in the plugin data folder.", control: { type: "toggle", key: "keepLogFile" } },
+          { name: "Enable sync log", desc: "Record sync activity in the in-memory log (and on disk if enabled below). When off, the log is empty and nothing is written to disk.", control: { type: "toggle", key: "enableLogging" } },
+          { name: "Keep log file", desc: "Also persist the log to the plugin data folder.", control: { type: "toggle", key: "keepLogFile" } },
           { name: "Log lines", desc: "How many log lines to keep in memory.", control: { type: "number", key: "logLines" } },
         ],
       },

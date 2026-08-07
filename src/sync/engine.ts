@@ -9,7 +9,7 @@ import { App } from "obsidian";
 import { MegaAdapter, RemoteFile } from "../mega/mega-adapter";
 import { LocalInventory } from "./local";
 import { Logger } from "../ui/logger";
-import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult } from "./types";
+import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult, SyncOp, FILE_TYPE_PRESETS } from "./types";
 
 const SNAPSHOT_VERSION = 1;
 const MTIME_TOLERANCE_MS = 1500;
@@ -64,6 +64,13 @@ export class SyncEngine {
     const R = await this.mega.listRemote();
     this.logger.info(`Remote: ${R.size} files.`);
 
+    // Apply the file-type filter to both sides so excluded files are simply
+    // ignored (left untouched) rather than deleted. Filtering the snapshot is
+    // intentionally skipped: an excluded file present in the snapshot but
+    // absent from both L and R resolves to `lGone && rGone` -> skip.
+    this.filterByType(L);
+    this.filterByType(R);
+
     // Load snapshot: prefer the remote one (so multiple devices converge),
     // fall back to the locally cached one.
     let S = await this.mega.readSnapshot();
@@ -74,7 +81,7 @@ export class SyncEngine {
     const snapshot: SyncSnapshot = S ?? { v: SNAPSHOT_VERSION, savedAt: 0, files: {} };
 
     // Compute the plan.
-    const plan = this.plan(L, R, snapshot.files);
+    const plan = this.plan(L, R, snapshot.files, this.settings.syncDirection);
     this.logger.info(
       `Plan: ${plan.length} actions ` +
         `(${plan.filter((o) => o.type === "upload").length} up, ` +
@@ -113,13 +120,16 @@ export class SyncEngine {
     return result;
   }
 
-  /** Decide the list of operations given L, R, and the snapshot. */
+  /** Decide the list of operations given L, R, and the snapshot. The two-way
+   *  decision is computed first, then each op is remapped to honour the
+   *  configured sync direction (one-way strict mirror). */
   private plan(
     L: Map<string, FileEntry>,
     R: Map<string, RemoteFile>,
     S: Record<string, FileEntry>,
-  ): { type: import("./types").SyncOp["type"]; path: string; reason: string }[] {
-    const ops: { type: import("./types").SyncOp["type"]; path: string; reason: string }[] = [];
+    dir: MegaSyncSettings["syncDirection"],
+  ): SyncOp[] {
+    const ops: SyncOp[] = [];
     const all = new Set<string>([...L.keys(), ...R.keys(), ...Object.keys(S)]);
 
     for (const path of all) {
@@ -132,17 +142,17 @@ export class SyncEngine {
 
       // New local file only.
       if (l && !r && !s) {
-        ops.push({ type: "upload", path, reason: "new local file" });
+        ops.push(this.remap({ type: "upload", path, reason: "new local file" }, l, r, dir));
         continue;
       }
       // New remote file only.
       if (r && !l && !s) {
-        ops.push({ type: "download", path, reason: "new remote file" });
+        ops.push(this.remap({ type: "download", path, reason: "new remote file" }, l, r, dir));
         continue;
       }
       // New on both sides simultaneously -> conflict (keep both).
       if (l && r && !s) {
-        ops.push({ type: "conflict", path, reason: "new on both sides" });
+        ops.push(this.remap({ type: "conflict", path, reason: "new on both sides" }, l, r, dir));
         continue;
       }
 
@@ -152,12 +162,12 @@ export class SyncEngine {
       // Deletions.
       if (lGone && r && !rChanged) {
         // Deleted locally, remote unchanged -> delete remote.
-        ops.push({ type: "deleteRemote", path, reason: "deleted locally" });
+        ops.push(this.remap({ type: "deleteRemote", path, reason: "deleted locally" }, l, r, dir));
         continue;
       }
       if (rGone && l && !lChanged) {
         // Deleted remotely, local unchanged -> delete local.
-        ops.push({ type: "deleteLocal", path, reason: "deleted remotely" });
+        ops.push(this.remap({ type: "deleteLocal", path, reason: "deleted remotely" }, l, r, dir));
         continue;
       }
       if (lGone && rGone) {
@@ -168,15 +178,15 @@ export class SyncEngine {
 
       // Modifications.
       if (lChanged && !rChanged) {
-        ops.push({ type: "upload", path, reason: "modified locally" });
+        ops.push(this.remap({ type: "upload", path, reason: "modified locally" }, l, r, dir));
         continue;
       }
       if (rChanged && !lChanged) {
-        ops.push({ type: "download", path, reason: "modified remotely" });
+        ops.push(this.remap({ type: "download", path, reason: "modified remotely" }, l, r, dir));
         continue;
       }
       if (lChanged && rChanged) {
-        ops.push({ type: "conflict", path, reason: "modified on both sides" });
+        ops.push(this.remap({ type: "conflict", path, reason: "modified on both sides" }, l, r, dir));
         continue;
       }
 
@@ -187,9 +197,100 @@ export class SyncEngine {
     return ops;
   }
 
+  /** Remap a two-way op for one-way strict-mirror directions.
+   *  upload-only: local is the source, remote mirrors it.
+   *  download-only: remote is the source, local mirrors it.
+   *  Needs `l`/`r` to disambiguate cases where the two-way op is a pull/push
+   *  that, in mirror mode, becomes either an overwrite of the target or a
+   *  deletion of the orphaned side. */
+  private remap(
+    op: SyncOp,
+    l: FileEntry | undefined,
+    r: RemoteFile | undefined,
+    dir: MegaSyncSettings["syncDirection"],
+  ): SyncOp {
+    if (dir === "two-way") return op;
+    const { path } = op;
+
+    if (dir === "upload-only") {
+      switch (op.type) {
+        case "upload":
+          return op; // local -> remote, always allowed
+        case "download":
+          // Pulling from remote. If a local file exists (remote was modified,
+          // local unchanged), local wins -> overwrite remote. If no local file
+          // exists (orphan on remote), mirror semantics delete it from remote.
+          return l
+            ? { type: "upload", path, reason: "local wins (upload-only)" }
+            : { type: "deleteRemote", path, reason: "orphan on remote (upload-only)" };
+        case "deleteRemote":
+          return op; // local deletion propagates to remote
+        case "deleteLocal":
+          return { type: "skip", path, reason: "never delete local (upload-only)" };
+        case "conflict":
+          return { type: "upload", path, reason: "local wins (upload-only)" };
+        case "skip":
+        case "mkdirRemote":
+          return op;
+      }
+    }
+
+    // download-only: remote is the source, local mirrors it.
+    switch (op.type) {
+      case "download":
+        return op; // remote -> local, always allowed
+      case "upload":
+        // Pushing to remote. If a remote file exists (local was modified,
+        // remote unchanged), remote wins -> overwrite local. If no remote file
+        // exists (orphan on local), mirror semantics delete it locally.
+        return r
+          ? { type: "download", path, reason: "remote wins (download-only)" }
+          : { type: "deleteLocal", path, reason: "orphan on local (download-only)" };
+      case "deleteLocal":
+        return op; // remote deletion propagates to local
+      case "deleteRemote":
+        return { type: "skip", path, reason: "never delete remote (download-only)" };
+      case "conflict":
+        return { type: "download", path, reason: "remote wins (download-only)" };
+      case "skip":
+      case "mkdirRemote":
+        return op;
+    }
+  }
+
+  /** Whether `path`'s extension is allowed by the file-type filter. */
+  private allowedType(path: string): boolean {
+    if (this.settings.fileTypeMode !== "whitelist") return true;
+    const allow = new Set<string>();
+    const sel: Record<string, boolean> = {
+      notes: this.settings.fileTypePresetNotes,
+      images: this.settings.fileTypePresetImages,
+      pdf: this.settings.fileTypePresetPdf,
+      audio: this.settings.fileTypePresetAudio,
+      video: this.settings.fileTypePresetVideo,
+    };
+    for (const k of Object.keys(sel)) {
+      if (sel[k]) FILE_TYPE_PRESETS[k].exts.forEach((e) => allow.add(e));
+    }
+    this.settings.fileTypeCustomExt.split(/[\s,]+/).forEach((e) => {
+      if (e) allow.add(e.replace(/^\.+/, "").toLowerCase());
+    });
+    if (allow.size === 0) return true; // empty whitelist = allow all (anti-wipe)
+    const dot = path.lastIndexOf(".");
+    if (dot < 0) return false; // no extension -> excluded in whitelist mode
+    return allow.has(path.slice(dot + 1).toLowerCase());
+  }
+
+  /** Remove disallowed-type entries from an inventory map (in place). */
+  private filterByType<K, V extends { path: string }>(m: Map<K, V>): void {
+    for (const [k, v] of m) {
+      if (!this.allowedType(v.path)) m.delete(k);
+    }
+  }
+
   /** Execute a single operation. */
   private async execute(
-    op: { type: import("./types").SyncOp["type"]; path: string; reason: string },
+    op: SyncOp,
     L: Map<string, FileEntry>,
     R: Map<string, RemoteFile>,
     S: Record<string, FileEntry>,

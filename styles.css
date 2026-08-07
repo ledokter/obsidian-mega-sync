@@ -68,4 +68,5 @@
 .mega-mt-14 { margin-top: 14px; }
 .mega-mb-12 { margin-bottom: 12px; }
 .mega-text-right { text-align: right; }
+.mega-text-muted { color: var(--text-muted); }
 .mega-hidden { display: none; }

@@ -105,6 +105,18 @@ export interface MegaSyncSettings {
   /** Only sync when Obsidian reports it is online. */
   syncOnlyIfOnline: boolean;
 
+  /** Sync direction. `two-way` mirrors both sides; `upload-only` makes the
+   *  remote an exact copy of the local; `download-only` makes the local an
+   *  exact copy of the remote. One-way modes are strict mirrors: deletions
+   *  on the source side propagate to the target, and conflicts resolve in
+   *  favour of the source (overwriting the target). */
+  syncDirection: "two-way" | "upload-only" | "download-only";
+  /** Show a Notice announcing each sync (manual and automatic) before it starts. */
+  notifyBeforeSync: boolean;
+  /** Show a confirmation modal before MANUAL syncs only. Automatic syncs
+   *  (startup / interval / debounced) are never blocked. */
+  confirmManualSync: boolean;
+
   /** Include the `.obsidian` folder (vault config) in sync. */
   syncVaultConfig: boolean;
   /** Glob / regex patterns of paths to exclude (one per line). */
@@ -116,10 +128,32 @@ export interface MegaSyncSettings {
   /** Skip binary file detection (always sync bytes). */
   syncHiddenFiles: boolean;
 
+  /** File-type filter mode. `all` syncs every type; `whitelist` syncs only
+   *  the extensions selected via the presets + custom list below. Excluded
+   *  files are left untouched on both sides (non-destructive). */
+  fileTypeMode: "all" | "whitelist";
+  /** Whitelist preset: notes (md, txt, canvas). */
+  fileTypePresetNotes: boolean;
+  /** Whitelist preset: images (png, jpg, jpeg, gif, svg, webp). */
+  fileTypePresetImages: boolean;
+  /** Whitelist preset: PDF. */
+  fileTypePresetPdf: boolean;
+  /** Whitelist preset: audio (mp3, wav, ogg, m4a, flac). */
+  fileTypePresetAudio: boolean;
+  /** Whitelist preset: video (mp4, mov, webm, mkv). */
+  fileTypePresetVideo: boolean;
+  /** Extra extensions (comma/space separated, no dot) to sync in addition to
+   *  the selected presets when `fileTypeMode === "whitelist"`. */
+  fileTypeCustomExt: string;
+
   /** Show a status bar item. */
   showStatusBar: boolean;
   /** Show a ribbon icon. */
   showRibbon: boolean;
+  /** Master switch for the sync log. When false, nothing is recorded in the
+   *  in-memory ring buffer or the on-disk log file (and the "Show sync log"
+   *  modal will be empty). */
+  enableLogging: boolean;
   /** Keep a local log file under the plugin folder. */
   keepLogFile: boolean;
   /** Number of log lines to keep in the ring buffer. */
@@ -150,6 +184,9 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   syncOnSave: false,
   syncOnSaveDebounceMs: 5000,
   syncOnlyIfOnline: true,
+  syncDirection: "two-way",
+  notifyBeforeSync: true,
+  confirmManualSync: false,
   syncVaultConfig: false,
   excludePatterns: [
     ".trash/**",
@@ -159,13 +196,33 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   includePatterns: "",
   maxFileMb: 0,
   syncHiddenFiles: true,
+  fileTypeMode: "all",
+  fileTypePresetNotes: false,
+  fileTypePresetImages: false,
+  fileTypePresetPdf: false,
+  fileTypePresetAudio: false,
+  fileTypePresetVideo: false,
+  fileTypeCustomExt: "",
   showStatusBar: true,
   showRibbon: true,
+  enableLogging: true,
   keepLogFile: true,
   logLines: 500,
   conflictFolder: ".mega-sync-conflicts",
   useTrashForDeletion: true,
   confirmLocalDeletion: true,
+};
+
+/** Whitelist presets for the file-type filter. The keys match the boolean
+ *  settings fields `fileTypePreset<key>`. Used by both the settings UI (for
+ *  labels/descriptions) and the sync engine (to resolve selected presets to
+ *  allowed extensions). */
+export const FILE_TYPE_PRESETS: Record<string, { label: string; exts: string[] }> = {
+  notes: { label: "Notes", exts: ["md", "txt", "canvas"] },
+  images: { label: "Images", exts: ["png", "jpg", "jpeg", "gif", "svg", "webp"] },
+  pdf: { label: "PDF", exts: ["pdf"] },
+  audio: { label: "Audio", exts: ["mp3", "wav", "ogg", "m4a", "flac"] },
+  video: { label: "Video", exts: ["mp4", "mov", "webm", "mkv"] },
 };
 
 /** Result of a sync run, surfaced to the UI. */

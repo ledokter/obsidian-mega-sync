@@ -11,6 +11,7 @@ import {
   Plugin,
   addIcon,
   Notice,
+  Modal,
 } from "obsidian";
 import { MegaSyncSettings, DEFAULT_SETTINGS, SyncResult, Secrets } from "./sync/types";
 import { MegaAdapter } from "./mega/mega-adapter";
@@ -21,6 +22,29 @@ import { encryptSecrets, decryptSecrets } from "./crypto";
 
 const ICON_ID = "mega-sync-icon";
 const ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
+
+function directionLabel(dir: MegaSyncSettings["syncDirection"]): string {
+  switch (dir) {
+    case "upload-only":
+      return "upload to MEGA";
+    case "download-only":
+      return "download from MEGA";
+    default:
+      return "two-way sync";
+  }
+}
+
+/** One-line, human description of what a direction will do. */
+function directionDesc(dir: MegaSyncSettings["syncDirection"]): string {
+  switch (dir) {
+    case "upload-only":
+      return "push local files to MEGA and delete remote files no longer present locally (mirror)";
+    case "download-only":
+      return "pull MEGA files to local and delete local files no longer present remotely (mirror)";
+    default:
+      return "merge changes both ways between the vault and MEGA";
+  }
+}
 
 export class MegaSyncPlugin extends Plugin {
   settings: MegaSyncSettings = DEFAULT_SETTINGS;
@@ -247,7 +271,7 @@ export class MegaSyncPlugin extends Plugin {
     });
     this.addCommand({
       id: "test-connection",
-      name: "Test MEGA connection",
+      name: "Test MEGA connection & read/write",
       callback: () => this.testConnection(),
     });
     this.addCommand({
@@ -316,6 +340,30 @@ export class MegaSyncPlugin extends Plugin {
     });
   }
 
+  /** Confirmation modal shown before manual syncs when enabled. */
+  private confirmSync(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const dir = this.settings.syncDirection;
+      const modal = new Modal(this.app);
+      modal.titleEl.setText("Sync now?");
+      const body = modal.contentEl.createDiv();
+      body.createEl("p", { text: `Direction: ${directionLabel(dir)}.` });
+      body.createEl("p", { text: directionDesc(dir) });
+      body.createEl("p", {
+        text: "This may upload, download, and delete files. You can review the result in the sync log afterwards.",
+        cls: "mega-text-muted",
+      });
+      const btnRow = modal.contentEl.createDiv({ cls: "mega-text-right mega-mt-10" });
+      const cancel = btnRow.createEl("button", { text: "Cancel" });
+      const ok = btnRow.createEl("button", { text: "Sync" });
+      ok.classList.add("mod-cta");
+      ok.onclick = () => { modal.close(); resolve(true); };
+      cancel.onclick = () => { modal.close(); resolve(false); };
+      modal.onClose = () => resolve(false);
+      modal.open();
+    });
+  }
+
   async startSync(automatic: boolean): Promise<void> {
     if (this.syncing) {
       this.logger.info("Sync already running — skipping.");
@@ -342,6 +390,20 @@ export class MegaSyncPlugin extends Plugin {
       this.logger.info("Offline — skipping automatic sync.");
       this.setStatus("offline");
       return;
+    }
+
+    // Optional confirmation modal for MANUAL syncs only. Automatic syncs
+    // (startup / interval / debounced) are never blocked.
+    if (!automatic && this.settings.confirmManualSync) {
+      const ok = await this.confirmSync();
+      if (!ok) {
+        this.logger.info("Sync cancelled by user.");
+        return;
+      }
+    }
+
+    if (this.settings.notifyBeforeSync) {
+      new Notice(`MEGA Sync — ${directionLabel(this.settings.syncDirection)}…`, 3000);
     }
 
     this.syncing = true;
@@ -387,6 +449,9 @@ export class MegaSyncPlugin extends Plugin {
     }
   }
 
+  /** Connect to MEGA, then write a small test file, read it back, verify the
+   *  content matches, and delete it. Validates the full upload/download/delete
+   *  path — not just that the base folder is reachable. */
   async testConnection(): Promise<void> {
     if (this.isLocked()) {
       new Notice("Unlock MEGA Sync (settings → master passphrase) first.");
@@ -396,13 +461,31 @@ export class MegaSyncPlugin extends Plugin {
       new Notice("Set your MEGA credentials first.");
       return;
     }
-    new Notice("Testing MEGA connection…");
+    new Notice("Testing MEGA connection & read/write…");
     const mega = this.buildAdapter();
+    let testPath = "";
     try {
       await mega.connect();
       await mega.resolveBase();
       const files = await mega.listRemote();
-      new Notice(`MEGA OK — base folder reachable, ${files.size} file(s) present.`, 6000);
+
+      // Round-trip: write a unique marker, read it back, verify, then clean up.
+      const marker = `mega-sync-rttest-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      testPath = `${marker}.txt`;
+      await mega.upload(testPath, Buffer.from(marker, "utf8"));
+      const buf = await mega.download(testPath);
+      const got = buf.toString("utf8");
+      if (got !== marker) {
+        throw new Error(`Round-trip mismatch (wrote ${marker.length} bytes, read "${got.slice(0, 40)}").`);
+      }
+      await mega.deleteRemote(testPath);
+      testPath = "";
+
+      new Notice(
+        `MEGA OK — round-trip write/read verified, test file cleaned up. ${files.size} file(s) in base folder.`,
+        6000,
+      );
+      this.logger.ok("Round-trip test passed: upload + download + delete OK.");
 
       const session = mega.getSession();
       if (session && session.sid && session.key && this.secrets) {
@@ -410,9 +493,13 @@ export class MegaSyncPlugin extends Plugin {
         await this.persistSecrets();
       }
     } catch (e) {
-      new Notice(`MEGA connection failed: ${e instanceof Error ? e.message : String(e)}`, 10000);
-      this.logger.error("Connection test failed.", e);
+      new Notice(`MEGA test failed: ${e instanceof Error ? e.message : String(e)}`, 10000);
+      this.logger.error("Connection / round-trip test failed.", e);
     } finally {
+      // Best-effort cleanup of the test file if something failed mid-way.
+      if (testPath) {
+        try { await mega.deleteRemote(testPath); } catch { /* ignore */ }
+      }
       await mega.close();
     }
   }
