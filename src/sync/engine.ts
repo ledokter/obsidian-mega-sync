@@ -467,6 +467,11 @@ export class SyncEngine {
         const newName = conflictName.split("/").pop();
         if (newName) await this.mega.rename(path, newName);
         R.delete(path);
+        // Register the renamed file under its new path so the snapshot
+        // rebuilt at the end of this run knows it exists on both sides —
+        // otherwise the next sync sees an "unknown" remote file at this path
+        // and re-flags it as a fresh conflict, stacking suffixes forever.
+        R.set(conflictName, { ...remote, path: conflictName });
         result.conflicts++;
         this.logger.warn(`Conflict on "${path}" — kept remote copy as "${conflictName}".`);
       } catch (e) {
