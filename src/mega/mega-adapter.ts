@@ -99,7 +99,11 @@ export class MegaAdapter {
   /** Revive a cached session: build a Storage from {key, sid} (autologin off),
    *  then load the user record + file tree using the existing sid. */
   private async revive(session: SessionCache, email: string): Promise<Storage> {
-    const storage = Storage.fromJSON({
+    // megajs's `StorageJSON.options` typing requires a `password` even for
+    // session revival (a typing imperfection — the password is not used when a
+    // sid/key is present). Cast through `unknown` to keep the original shape
+    // without resorting to `any`.
+    const json = {
       key: session.key,
       sid: session.sid,
       name: session.name ?? "",
@@ -108,16 +112,18 @@ export class MegaAdapter {
         email,
         autoload: false,
         autologin: false,
-      } as any,
-    } as any);
+      },
+    } as unknown as Parameters<typeof Storage.fromJSON>[0];
+    const storage = Storage.fromJSON(json);
     await new Promise<void>((resolve, reject) => {
-      storage.api.request({ a: "ug" } as any, (err: any, resp: any) => {
+      void storage.api.request({ a: "ug" } as unknown as Parameters<typeof storage.api.request>[0], (err: Error | null, resp?: unknown) => {
         if (err) return reject(new Error(`ug: ${err}`));
-        if (resp) {
-          storage.name = resp.name ?? storage.name;
-          storage.user = resp.u ?? storage.user;
+        const r = resp as { name?: string; u?: string } | undefined;
+        if (r) {
+          storage.name = r.name ?? storage.name;
+          storage.user = r.u ?? storage.user;
         }
-        storage.reload(true, (e: any) => {
+        storage.reload(true, (e: Error | null) => {
           if (e) return reject(new Error(`reload: ${e}`));
           storage.status = "ready";
           resolve();
@@ -131,7 +137,7 @@ export class MegaAdapter {
    *  NOT contain the password). */
   getSession(): SessionCache | null {
     if (!this.storage) return null;
-    const j = (this.storage as any).toJSON();
+    const j = this.storage.toJSON();
     return {
       key: j.key,
       sid: j.sid,
@@ -145,12 +151,12 @@ export class MegaAdapter {
     if (!this.storage) throw new Error("Not connected.");
     if (this.baseNode) return this.baseNode;
 
-    const root = this.storage.root as MutableFile;
+    const root = this.storage.root;
     await this.ensureLoaded(root);
 
     let base = await this.findChild(root, this.opts.baseFolder);
     if (!base) {
-      base = (await root.mkdir(this.opts.baseFolder)) as MutableFile;
+      base = await root.mkdir(this.opts.baseFolder);
       this.logger.info(`Created remote base folder "${this.opts.baseFolder}".`);
     }
     await this.ensureLoaded(base);
@@ -159,7 +165,7 @@ export class MegaAdapter {
     if (sub) {
       let node = await this.findChild(base, sub);
       if (!node) {
-        node = (await base.mkdir(sub)) as MutableFile;
+        node = await base.mkdir(sub);
         this.logger.info(`Created remote sub-folder "${sub}".`);
       }
       await this.ensureLoaded(node);
@@ -185,7 +191,7 @@ export class MegaAdapter {
     const children = parent.children ?? [];
     const lower = name.toLowerCase();
     for (const c of children) {
-      if ((c.name ?? "").toLowerCase() === lower) return c as MutableFile;
+      if ((c.name ?? "").toLowerCase() === lower) return c;
     }
     return null;
   }
@@ -210,13 +216,13 @@ export class MegaAdapter {
     for (const child of children) {
       const childPath = relPath ? joinPath(relPath, child.name ?? "") : (child.name ?? "");
       if (child.directory) {
-        await this.walk(child as MutableFile, childPath, out);
+        await this.walk(child, childPath, out);
       } else {
         out.set(normalizePath(childPath), {
           path: normalizePath(childPath),
           size: child.size ?? 0,
           mtime: (child.timestamp ?? Math.floor(Date.now() / 1000)) * 1000,
-          node: child as MutableFile,
+          node: child,
           isDir: false,
         });
       }
@@ -236,7 +242,7 @@ export class MegaAdapter {
       { name, size: data.length, maxChunkSize: 1024 * 1024 },
       data,
     );
-    const file = (await upload.complete) as MutableFile;
+    const file = await upload.complete;
     return {
       path: normalizePath(relPath),
       size: file.size ?? data.length,

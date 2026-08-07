@@ -10,6 +10,7 @@ import { MegaAdapter, RemoteFile } from "../mega/mega-adapter";
 import { LocalInventory } from "./local";
 import { Logger } from "../ui/logger";
 import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult, SyncOp, FILE_TYPE_PRESETS } from "./types";
+import { PathFilter } from "./filter";
 
 const SNAPSHOT_VERSION = 1;
 const MTIME_TOLERANCE_MS = 1500;
@@ -39,8 +40,10 @@ export class SyncEngine {
     this.progress = fn;
   }
 
-  /** Run a full sync cycle. Throws on fatal errors. */
-  async run(): Promise<SyncResult> {
+  /** Run a full sync cycle. Throws on fatal errors. When `dry` is true, the
+   *  plan is computed and logged but no write/delete is performed and the
+   *  snapshot is not updated. */
+  async run(dry = false): Promise<SyncResult> {
     const t0 = Date.now();
     const result: SyncResult = {
       uploaded: 0,
@@ -64,10 +67,14 @@ export class SyncEngine {
     const R = await this.mega.listRemote();
     this.logger.info(`Remote: ${R.size} files.`);
 
-    // Apply the file-type filter to both sides so excluded files are simply
-    // ignored (left untouched) rather than deleted. Filtering the snapshot is
-    // intentionally skipped: an excluded file present in the snapshot but
-    // absent from both L and R resolves to `lGone && rGone` -> skip.
+    // Apply the path filter (always-skipped, hidden/underscore, regex) to both
+    // sides so excluded files are simply ignored (left untouched) rather than
+    // deleted. The local walk already applied it, but re-applying is cheap and
+    // idempotent; for the remote side this is the primary application.
+    const pathFilter = new PathFilter(this.settings);
+    this.filterByPath(L, pathFilter);
+    this.filterByPath(R, pathFilter);
+    // Apply the file-type filter likewise.
     this.filterByType(L);
     this.filterByType(R);
 
@@ -82,42 +89,91 @@ export class SyncEngine {
 
     // Compute the plan.
     const plan = this.plan(L, R, snapshot.files, this.settings.syncDirection);
+    const counts = {
+      up: plan.filter((o) => o.type === "upload").length,
+      down: plan.filter((o) => o.type === "download").length,
+      delR: plan.filter((o) => o.type === "deleteRemote").length,
+      delL: plan.filter((o) => o.type === "deleteLocal").length,
+      conf: plan.filter((o) => o.type === "conflict").length,
+    };
     this.logger.info(
       `Plan: ${plan.length} actions ` +
-        `(${plan.filter((o) => o.type === "upload").length} up, ` +
-        `${plan.filter((o) => o.type === "download").length} down, ` +
-        `${plan.filter((o) => o.type === "deleteRemote").length} del-r, ` +
-        `${plan.filter((o) => o.type === "deleteLocal").length} del-l, ` +
-        `${plan.filter((o) => o.type === "conflict").length} conflict).`,
+        `(${counts.up} up, ${counts.down} down, ${counts.delR} del-r, ${counts.delL} del-l, ${counts.conf} conflict).` +
+        (dry ? " [DRY RUN — nothing will change]" : ""),
     );
-
-    // Execute.
-    const total = plan.length;
-    let done = 0;
-    for (const op of plan) {
-      done++;
-      this.progress?.(done, total, op.path);
-      try {
-        await this.execute(op, L, R, snapshot.files, result);
-      } catch (e) {
-        result.errors++;
-        this.logger.error(`Failed: ${op.type} ${op.path}`, e);
+    if (dry) {
+      for (const op of plan) {
+        this.logger.info(`  [dry] ${op.type.padEnd(12)} ${op.path}  — ${op.reason}`);
       }
     }
 
-    // Rewrite the snapshot to the new merged state.
-    this.rebuildSnapshot(snapshot, L, R);
-    snapshot.savedAt = Date.now();
-    await this.mega.writeSnapshot(snapshot);
+    // Safety guard: abort if too many files would change in one run.
+    if (!dry) {
+      this.guardModifyPercentage(plan, L, R);
+    }
+
+    // Execute (skipped in dry-run mode).
+    if (!dry) {
+      const total = plan.length;
+      let done = 0;
+      for (const op of plan) {
+        done++;
+        this.progress?.(done, total, op.path);
+        try {
+          await this.execute(op, L, R, snapshot.files, result);
+        } catch (e) {
+          result.errors++;
+          this.logger.error(`Failed: ${op.type} ${op.path}`, e);
+        }
+      }
+
+      // Rewrite the snapshot to the new merged state.
+      this.rebuildSnapshot(snapshot, L, R);
+      snapshot.savedAt = Date.now();
+      await this.mega.writeSnapshot(snapshot);
+    } else {
+      // Reflect the plan in the dry-run result counts.
+      result.uploaded = counts.up;
+      result.downloaded = counts.down;
+      result.deletedRemote = counts.delR;
+      result.deletedLocal = counts.delL;
+      result.conflicts = counts.conf;
+      result.skipped = plan.filter((o) => o.type === "skip").length;
+    }
 
     result.durationMs = Date.now() - t0;
     this.logger.ok(
-      `Sync complete in ${(result.durationMs / 1000).toFixed(1)}s — ` +
+      `${dry ? "Dry run" : "Sync"} complete in ${(result.durationMs / 1000).toFixed(1)}s — ` +
         `↑${result.uploaded} ↓${result.downloaded} ` +
         `delR:${result.deletedRemote} delL:${result.deletedLocal} ` +
         `conflicts:${result.conflicts} errors:${result.errors}`,
     );
     return result;
+  }
+
+  /** Abort the sync if the share of modifying/deleting ops exceeds the
+   *  configured percentage. Protects against mass deletions when one side
+   *  appears empty (wrong vault, lost snapshot, …). `100` disables the guard;
+   *  the exact-100%/100% case (every file changes) is allowed. */
+  private guardModifyPercentage(plan: SyncOp[], L: Map<string, FileEntry>, R: Map<string, RemoteFile>): void {
+    const pct = this.settings.protectModifyPercentage;
+    if (pct >= 100) return;
+    const allFiles = new Set<string>([...L.keys(), ...R.keys()]);
+    const total = allFiles.size;
+    if (total === 0) return;
+    const modifyDelete = plan.filter((o) => o.type !== "skip").length;
+    const ratio = (modifyDelete * 100) / total;
+    // Special case: if literally everything changes, allow it (legitimate full
+    // bootstrap / wipe-and-restore). Otherwise enforce the threshold.
+    if (modifyDelete === total) return;
+    if (ratio >= pct) {
+      const msg =
+        `Aborted: ${modifyDelete}/${total} files (${ratio.toFixed(0)}%) would change, ` +
+        `exceeding the ${pct}% safety guard. Run a dry run to review, or raise ` +
+        `"Max % of files changed per sync" in settings.`;
+      this.logger.error(msg);
+      throw new Error(msg);
+    }
   }
 
   /** Decide the list of operations given L, R, and the snapshot. The two-way
@@ -197,12 +253,12 @@ export class SyncEngine {
     return ops;
   }
 
-  /** Remap a two-way op for one-way strict-mirror directions.
-   *  upload-only: local is the source, remote mirrors it.
-   *  download-only: remote is the source, local mirrors it.
-   *  Needs `l`/`r` to disambiguate cases where the two-way op is a pull/push
-   *  that, in mirror mode, becomes either an overwrite of the target or a
-   *  deletion of the orphaned side. */
+  /** Remap a two-way op for one-way directions.
+   *  Strict mirror (deletions propagated): upload-only, download-only.
+   *  Non-destructive one-way (no deletions, conflicts left as-is): push-only,
+   *  pull-only. Needs `l`/`r` to disambiguate mirror cases where a pull/push
+   *  becomes either an overwrite of the target or a deletion of the orphaned
+   *  side. */
   private remap(
     op: SyncOp,
     l: FileEntry | undefined,
@@ -211,6 +267,19 @@ export class SyncEngine {
   ): SyncOp {
     if (dir === "two-way") return op;
     const { path } = op;
+
+    // Non-destructive one-way: only allow the source-side transfer; skip
+    // everything else (no deletions, conflicts left for a two-way run).
+    if (dir === "push-only") {
+      return op.type === "upload"
+        ? op
+        : { type: "skip", path, reason: "skipped (push-only, no delete)" };
+    }
+    if (dir === "pull-only") {
+      return op.type === "download"
+        ? op
+        : { type: "skip", path, reason: "skipped (pull-only, no delete)" };
+    }
 
     if (dir === "upload-only") {
       switch (op.type) {
@@ -285,6 +354,14 @@ export class SyncEngine {
   private filterByType<K, V extends { path: string }>(m: Map<K, V>): void {
     for (const [k, v] of m) {
       if (!this.allowedType(v.path)) m.delete(k);
+    }
+  }
+
+  /** Remove entries whose path is skipped by the shared PathFilter (always-
+   *  skipped names, hidden/underscore, regex ignore/allow). In place. */
+  private filterByPath<K, V extends { path: string }>(m: Map<K, V>, f: PathFilter): void {
+    for (const [k, v] of m) {
+      if (f.shouldSkip(v.path)) m.delete(k);
     }
   }
 
@@ -367,7 +444,8 @@ export class SyncEngine {
     const remote = R.get(path);
     if (remote) {
       try {
-        await this.mega.rename(path, conflictName.split("/").pop() as string);
+        const newName = conflictName.split("/").pop();
+        if (newName) await this.mega.rename(path, newName);
         R.delete(path);
         result.conflicts++;
         this.logger.warn(`Conflict on "${path}" — kept remote copy as "${conflictName}".`);

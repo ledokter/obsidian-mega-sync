@@ -26,9 +26,13 @@ const ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 function directionLabel(dir: MegaSyncSettings["syncDirection"]): string {
   switch (dir) {
     case "upload-only":
-      return "upload to MEGA";
+      return "upload to MEGA (mirror)";
     case "download-only":
-      return "download from MEGA";
+      return "download from MEGA (mirror)";
+    case "push-only":
+      return "push to MEGA (no deletions)";
+    case "pull-only":
+      return "pull from MEGA (no deletions)";
     default:
       return "two-way sync";
   }
@@ -41,6 +45,10 @@ function directionDesc(dir: MegaSyncSettings["syncDirection"]): string {
       return "push local files to MEGA and delete remote files no longer present locally (mirror)";
     case "download-only":
       return "pull MEGA files to local and delete local files no longer present remotely (mirror)";
+    case "push-only":
+      return "push new and modified local files to MEGA. No files are deleted on either side.";
+    case "pull-only":
+      return "pull new and modified MEGA files to local. No files are deleted on either side.";
     default:
       return "merge changes both ways between the vault and MEGA";
   }
@@ -98,8 +106,8 @@ export class MegaSyncPlugin extends Plugin {
   // ----- Settings & secrets -----------------------------------------------
 
   async loadSettings(): Promise<void> {
-    const data = (await this.loadData()) || {};
-    this.settings = { ...DEFAULT_SETTINGS, ...data };
+    const data = (await this.loadData()) as Partial<MegaSyncSettings> | null;
+    this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
     if (this.settings.session === undefined) this.settings.session = null;
     if (this.settings.secretsBlob === undefined) this.settings.secretsBlob = null;
 
@@ -265,6 +273,11 @@ export class MegaSyncPlugin extends Plugin {
       callback: () => this.startSync(false).catch(() => {}),
     });
     this.addCommand({
+      id: "dry-run",
+      name: "Simulate sync (dry run)",
+      callback: () => this.dryRun().catch(() => {}),
+    });
+    this.addCommand({
       id: "show-log",
       name: "Show sync log",
       callback: () => this.openLogModal(),
@@ -408,6 +421,7 @@ export class MegaSyncPlugin extends Plugin {
 
     this.syncing = true;
     this.setStatus("syncing…", "syncing");
+    this.ribbonEl?.addClass("syncing");
     const mega = this.buildAdapter();
     const engine = new SyncEngine(this.app, this.settings, mega, this.logger);
 
@@ -446,6 +460,41 @@ export class MegaSyncPlugin extends Plugin {
     } finally {
       await mega.close();
       this.syncing = false;
+      this.ribbonEl?.removeClass("syncing");
+    }
+  }
+
+  /** Simulate a sync: build inventories and the plan, log every planned op,
+   *  but perform no upload/download/delete and do not update the snapshot. */
+  async dryRun(): Promise<void> {
+    if (this.isLocked()) {
+      new Notice("Unlock MEGA Sync (settings → master passphrase) first.");
+      return;
+    }
+    if (!this.secrets || (!this.secrets.email && !this.secrets.session?.sid)) {
+      new Notice("Set your MEGA credentials first.");
+      return;
+    }
+    if (!this.isOnline()) {
+      new Notice("Offline — cannot run a dry run.");
+      return;
+    }
+    new Notice(`MEGA Sync — dry run (${directionLabel(this.settings.syncDirection)})…`, 3000);
+    const mega = this.buildAdapter();
+    const engine = new SyncEngine(this.app, this.settings, mega, this.logger);
+    try {
+      const result = await engine.run(true);
+      new Notice(
+        `Dry run — ↑${result.uploaded} ↓${result.downloaded} ` +
+          `delR:${result.deletedRemote} delL:${result.deletedLocal} ` +
+          `conflicts:${result.conflicts}. Nothing was changed. Open the log for details.`,
+        8000,
+      );
+    } catch (e) {
+      this.logger.error("Dry run failed.", e);
+      new Notice(`Dry run failed: ${e instanceof Error ? e.message : String(e)}`, 10000);
+    } finally {
+      await mega.close();
     }
   }
 

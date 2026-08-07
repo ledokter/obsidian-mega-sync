@@ -14,8 +14,8 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
 | `manifest.json` complete & compliant | ✅ (id `mega-sync`, no `obsidian` in id, no `fundingUrl`) |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.2.0 |
-| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.2.0` on `master`) |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.2.1 |
+| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.2.1` on `master`) |
 | `versions.json` present | ✅ |
 | README + LICENSE | ✅ |
 | At-rest encryption (AES-256-GCM + scrypt) | ✅ |
@@ -38,9 +38,9 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 6. Click **Submit**.
 
 The directory reads the `manifest.json` at the HEAD of `master` (currently
-`1.2.0`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
+`1.2.1`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
 GitHub release whose tag matches the manifest version — that release
-(`1.2.0`) is produced automatically by the `release` GitHub Actions workflow,
+(`1.2.1`) is produced automatically by the `release` GitHub Actions workflow,
 which also attests build provenance for the assets.
 
 ## After submission
@@ -75,19 +75,32 @@ Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plug
       `test-connection`, `lock`) — Obsidian prefixes them automatically.
 - [x] No sample/template code; original implementation.
 - [x] No remote code loading; not obfuscated; full TypeScript source in the repo.
-- [x] GitHub release `1.2.0` attaches `main.js`, `manifest.json`, `styles.css`,
+- [x] **Filesystem access is justified**: the plugin is `isDesktopOnly: true` and uses
+      Node.js `crypto`/`Buffer` only through the bundled `megajs` library (MEGA's
+      protocol requires client-side encryption, handled in pure-JS by megajs).
+      File access is limited to the Obsidian vault and the plugin's own data
+      folder; the only out-of-vault operation is sending deleted files to the
+      system trash via Obsidian's `fileManager.trashFile` API (optional). See
+      the "Sécurité & accès au système de fichiers" section in README.md.
+- [x] GitHub release `1.2.1` attaches `main.js`, `manifest.json`, `styles.css`,
       with build-provenance attestations.
-- [x] Release tag (`1.2.0`) matches `manifest.json` version (`1.2.0`).
+- [x] Release tag (`1.2.1`) matches `manifest.json` version (`1.2.1`).
 
-## Features (1.2.0)
+## Features (1.2.1)
 
-- Sync direction: two-way mirror (default), upload-only, or download-only
-  (strict mirror — source-side deletions propagate to the target).
+- Sync direction: two-way mirror (default), upload-only / download-only (strict
+  mirror), or push-only / pull-only (one-way without deletions).
 - Pre-sync notification + optional confirmation modal for manual syncs.
 - Round-trip "Test read/write" button (write → read → verify → delete).
 - File-type filter: all types, or a whitelist with presets (Notes, Images,
   PDF, Audio, Video) + custom extensions. Excluded files are left untouched.
+- Path filtering: glob exclude/include, regex ignore + regex allowlist, always-
+  skipped system files (.git, node_modules, .DS_Store, ~$* Office temp, …),
+  dot/underscore hidden-file rules, individual `.obsidian/bookmarks.json` sync.
+- Dry-run command (simulate sync, no changes) + safety guard
+  `protectModifyPercentage` (abort if too many files change in one run).
 - Toggleable sync log (in-memory ring buffer + optional on-disk file).
+- Ribbon icon animates while syncing.
 
 ## Manual test before review
 

@@ -67,7 +67,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         desc: "Enter your master passphrase to unlock the MEGA credentials.",
         aliases: ["passphrase", "unlock", "encrypt"],
         visible: () => this.plugin.isLocked(),
-        action: async () => {
+        action: () => { void (async () => {
           const pass = await this.askPassphrase("Unlock", "Master passphrase");
           if (pass === null) return;
           try {
@@ -76,7 +76,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           } catch (e) {
             new Notice(e instanceof Error ? e.message : "Wrong passphrase.");
           }
-        },
+        })(); },
       },
 
       // Security
@@ -97,7 +97,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
             : {
                 name: "Master passphrase",
                 desc: "Set a passphrase to encrypt your MEGA credentials and cached session at rest. It will also lock this settings panel. Without it, secrets are stored in plaintext in data.json.",
-                action: async () => {
+                action: () => { void (async () => {
                   const pass = await this.askPassphrase("Set master passphrase", "Choose a passphrase", true);
                   if (pass === null) return;
                   try {
@@ -107,13 +107,13 @@ export class MegaSyncSettingTab extends PluginSettingTab {
                   } catch (e) {
                     new Notice(e instanceof Error ? e.message : "Failed.");
                   }
-                },
+                })(); },
               },
           encrypted
             ? {
                 name: "Disable encryption",
                 desc: "Decrypt and store secrets in plaintext again. Requires the current passphrase.",
-                action: async () => {
+                action: () => { void (async () => {
                   const pass = await this.askPassphrase("Disable encryption", "Enter current master passphrase");
                   if (pass === null) return;
                   try {
@@ -123,7 +123,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
                   } catch (e) {
                     new Notice(e instanceof Error ? e.message : "Failed.");
                   }
-                },
+                })(); },
               }
             : {
                 name: "Plaintext warning",
@@ -205,14 +205,16 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         items: [
           {
             name: "Sync direction",
-            desc: "Two-way mirrors both sides. Upload-only makes MEGA an exact copy of the local vault (local deletions are propagated to MEGA; conflicts overwrite MEGA). Download-only makes the local vault an exact copy of MEGA (remote deletions are propagated locally; conflicts overwrite local). One-way modes can delete files on the target side.",
+            desc: "Two-way mirrors both sides. Upload-only / Download-only are strict mirrors: source-side deletions propagate to the target and conflicts overwrite the target (can delete files). Push-only / Pull-only are safer one-way modes: they only transfer new and modified files and never delete anything on either side.",
             control: {
               type: "dropdown",
               key: "syncDirection",
               options: {
                 "two-way": "Two-way (mirror both sides)",
-                "upload-only": "Upload only (local → MEGA)",
-                "download-only": "Download only (MEGA → local)",
+                "upload-only": "Upload only (local → MEGA, mirror)",
+                "download-only": "Download only (MEGA → local, mirror)",
+                "push-only": "Push only (local → MEGA, no deletions)",
+                "pull-only": "Pull only (MEGA → local, no deletions)",
               },
             },
           },
@@ -250,10 +252,14 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           { name: "Video", desc: `Sync video: ${FILE_TYPE_PRESETS.video.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetVideo" } },
           { name: "Custom extensions", desc: "Extra extensions (comma or space separated, no dot) to sync in addition to the presets above. e.g. docx, xlsx, epub", visible: () => s.fileTypeMode === "whitelist", control: { type: "text", key: "fileTypeCustomExt", placeholder: "docx, xlsx, epub" } },
           { name: "Sync vault config", desc: "Include the config folder so settings, themes and plugins are mirrored across devices.", control: { type: "toggle", key: "syncVaultConfig" } },
+          { name: "Sync bookmarks only", desc: "Sync only .obsidian/bookmarks.json without the rest of the config folder. Only effective when 'Sync vault config' is off.", visible: () => !s.syncVaultConfig, control: { type: "toggle", key: "syncBookmarks" } },
           { name: "Exclude patterns", desc: "Glob patterns (one per line) of paths to exclude. Supports * and **. e.g. .trash/** or *.tmp", control: { type: "textarea", key: "excludePatterns" } },
           { name: "Include patterns (override)", desc: "Paths matching these patterns are synced even if excluded above.", control: { type: "textarea", key: "includePatterns" } },
+          { name: "Ignore paths (regex)", desc: "JavaScript regular expressions (one per line). Paths matching any regex are skipped on both sides, in addition to the glob patterns above. e.g. ^trash/ or \\.(tmp|bak)$", control: { type: "textarea", key: "ignorePathsRegex" } },
+          { name: "Only allow paths (regex)", desc: "JavaScript regular expressions (one per line). When non-empty, only paths matching at least one regex are synced. Empty = allow all. Parents of allowed files are auto-allowed.", control: { type: "textarea", key: "onlyAllowPathsRegex" } },
           { name: "Max file size (MB)", desc: "Skip files larger than this. 0 = no limit.", control: { type: "number", key: "maxFileMb" } },
-          { name: "Sync hidden files", desc: "Include dotfiles and files inside hidden folders (other than those excluded above).", control: { type: "toggle", key: "syncHiddenFiles" } },
+          { name: "Sync hidden files", desc: "Include dotfiles and files inside dot-prefixed folders. Off by default (dotfiles are skipped, like Remotely Save).", control: { type: "toggle", key: "syncHiddenFiles" } },
+          { name: "Sync underscore items", desc: "Include files and folders starting with _ (underscore). Off by default.", control: { type: "toggle", key: "syncUnderscoreItems" } },
         ],
       },
 
@@ -264,6 +270,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         items: [
           { name: "Conflict folder", desc: "Name of the local folder where conflict copies are stored.", control: { type: "text", key: "conflictFolder" } },
           { name: "Use trash for deletion", desc: "Move deleted local files to the system trash instead of deleting permanently.", control: { type: "toggle", key: "useTrashForDeletion" } },
+          { name: "Max % of files changed per sync", desc: "Abort the sync if more than this % of all files would be modified or deleted in a single run. Safety guard against mass deletions (e.g. a wrongly-empty vault). 0 = always block, 100 = disabled.", control: { type: "number", key: "protectModifyPercentage" } },
         ],
       },
 
@@ -293,11 +300,11 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           {
             name: "Reset local snapshot",
             desc: "Forget the locally cached sync snapshot. The remote snapshot (if any) is still used, so a first sync after this is treated as a merge, not a fresh sync.",
-            action: async () => {
+            action: () => { void (async () => {
               this.plugin.settings.lastSnapshot = undefined;
               await this.plugin.saveSettings();
               new Notice("Local snapshot reset.");
-            },
+            })(); },
           },
           {
             name: "Lock secrets now",
@@ -312,7 +319,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           {
             name: "Reset all settings",
             desc: "Restore the default configuration. Does NOT delete your files or your encrypted secrets blob.",
-            action: async () => {
+            action: () => { void (async () => {
               const blob = this.plugin.settings.secretsBlob;
               const enc = this.plugin.settings.secretsEncrypted;
               this.plugin.settings = { ...DEFAULT_SETTINGS };
@@ -324,7 +331,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings();
               this.update();
               new Notice("Settings reset to defaults.");
-            },
+            })(); },
           },
         ],
       },

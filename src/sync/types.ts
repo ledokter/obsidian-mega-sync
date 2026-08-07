@@ -110,7 +110,7 @@ export interface MegaSyncSettings {
    *  exact copy of the remote. One-way modes are strict mirrors: deletions
    *  on the source side propagate to the target, and conflicts resolve in
    *  favour of the source (overwriting the target). */
-  syncDirection: "two-way" | "upload-only" | "download-only";
+  syncDirection: "two-way" | "upload-only" | "download-only" | "push-only" | "pull-only";
   /** Show a Notice announcing each sync (manual and automatic) before it starts. */
   notifyBeforeSync: boolean;
   /** Show a confirmation modal before MANUAL syncs only. Automatic syncs
@@ -119,14 +119,30 @@ export interface MegaSyncSettings {
 
   /** Include the `.obsidian` folder (vault config) in sync. */
   syncVaultConfig: boolean;
+  /** Sync only `.obsidian/bookmarks.json` without the rest of the config folder.
+   *  Only effective when `syncVaultConfig` is false. */
+  syncBookmarks: boolean;
   /** Glob / regex patterns of paths to exclude (one per line). */
   excludePatterns: string;
   /** Glob / regex patterns to force-include even if excluded (one per line). */
   includePatterns: string;
+  /** JavaScript regular expressions (one per line) of paths to ignore. Applied
+   *  to both local and remote, in addition to the glob exclude patterns. */
+  ignorePathsRegex: string;
+  /** JavaScript regular expressions (one per line) allowlist. When non-empty,
+   *  only paths matching at least one regex are synced. Empty = allow all. */
+  onlyAllowPathsRegex: string;
   /** Skip files larger than this many MB. 0 = no limit. */
   maxFileMb: number;
-  /** Skip binary file detection (always sync bytes). */
+  /** Include dotfiles and files inside hidden folders. Dot-prefixed paths are
+   *  skipped by default (like Remotely Save); enable to sync them. */
   syncHiddenFiles: boolean;
+  /** Include files/folders starting with `_` (underscore). Skipped by default. */
+  syncUnderscoreItems: boolean;
+  /** Abort the sync if more than this % of all files would be modified or
+   *  deleted in a single run. 0 = always block, 100 = disabled. Safety guard
+   *  against mass deletions (e.g. a wrongly-empty vault). */
+  protectModifyPercentage: number;
 
   /** File-type filter mode. `all` syncs every type; `whitelist` syncs only
    *  the extensions selected via the presets + custom list below. Excluded
@@ -188,14 +204,19 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   notifyBeforeSync: true,
   confirmManualSync: false,
   syncVaultConfig: false,
+  syncBookmarks: false,
   excludePatterns: [
     ".trash/**",
     "node_modules/**",
     ".git/**",
   ].join("\n"),
   includePatterns: "",
+  ignorePathsRegex: "",
+  onlyAllowPathsRegex: "",
   maxFileMb: 0,
   syncHiddenFiles: true,
+  syncUnderscoreItems: false,
+  protectModifyPercentage: 50,
   fileTypeMode: "all",
   fileTypePresetNotes: false,
   fileTypePresetImages: false,

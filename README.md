@@ -26,6 +26,14 @@ MEGA Sync synchronise le contenu de votre vault Obsidian avec un dossier de votr
 - **Instantané partagé** : `_mega_sync_snapshot.json` est stocké sur MEGA afin que plusieurs appareils convergent vers le même état.
 - **Barre d'état + icône du ruban + journal** consultable (commande « Show sync log »).
 - **Verrouillage des réglages** par mot de passe optionnel.
+- **Sens de sync** : bidirectionnel (miroir), upload-only / download-only (miroir strict), ou push-only / pull-only (unidirectionnel sans suppression).
+- **Dry-run** : simuler une sync (commande « Simulate sync ») pour voir le plan sans rien modifier.
+- **Garde de sécurité** : abort automatique si trop de fichiers sont modifiés/supprimés en une seule sync (`protectModifyPercentage`).
+- **Logs activables/désactivables** + bouton **Test read/write** (écrit, relit, vérifie, supprime un fichier test sur MEGA).
+
+### Sécurité & accès au système de fichiers
+
+Le plugin est **desktop uniquement** (`isDesktopOnly: true`). La bibliothèque [`megajs`](https://www.npmjs.com/package/megajs) utilisée pour parler à MEGA emploie les APIs Node.js `crypto` et `Buffer` (le protocole MEGA exige un chiffrement côté client, géré en pure-JS par megajs). L'accès au système de fichiers se limite au **vault Obsidian** et au **dossier de données du plugin** — le plugin ne lit ni n'écrit jamais en dehors de ces limites, à l'exception de la corbeille système (via l'API Obsidian `fileManager.trashFile`) lorsque l'option « Use trash for deletion » est activée. Aucun code distant n'est chargé ; le code source TypeScript complet est publié.
 
 ### Installation
 

@@ -3,8 +3,11 @@
 import { App, TFile, TFolder, TAbstractFile, Vault } from "obsidian";
 import { MegaSyncSettings, FileEntry } from "./types";
 import { matchesAnyPattern, normalizePath } from "../util";
+import { PathFilter } from "./filter";
 
 export class LocalInventory {
+  private pathFilter!: PathFilter;
+
   constructor(private app: App, private settings: MegaSyncSettings) {}
 
   /** Patterns always excluded, regardless of settings (plugin internals +
@@ -24,18 +27,31 @@ export class LocalInventory {
 
   /** Build the local inventory map. */
   async build(): Promise<Map<string, FileEntry>> {
+    this.pathFilter = new PathFilter(this.settings);
     const out = new Map<string, FileEntry>();
     const root = this.app.vault.getRoot();
-    await this.walk(root, out);
+    await this.walk(root, out, false);
     return out;
   }
 
-  private async walk(folder: TFolder, out: Map<string, FileEntry>): Promise<void> {
+  /** Walk a folder. `bookmarksOnly` is set when descending into the config
+   *  folder with syncBookmarks enabled but syncVaultConfig disabled: in that
+   *  mode only `bookmarks.json` (at the config root) is collected. */
+  private async walk(folder: TFolder, out: Map<string, FileEntry>, bookmarksOnly: boolean): Promise<void> {
     const children: TAbstractFile[] = folder.children ?? [];
     for (const child of children) {
       const rel = normalizePath(child.path);
       if (child instanceof TFile) {
+        if (bookmarksOnly) {
+          // Only the bookmarks file, bypassing the hidden/exclude rules that
+          // would otherwise drop it (it lives inside the dot-prefixed config dir).
+          if (child.name !== "bookmarks.json") continue;
+          if (this.tooLarge(child.stat.size)) continue;
+          out.set(rel, { path: rel, mtime: child.stat.mtime, size: child.stat.size });
+          continue;
+        }
         if (this.isExcluded(rel)) continue;
+        if (this.pathFilter.shouldSkip(rel)) continue;
         if (this.tooLarge(child.stat.size)) continue;
         out.set(rel, {
           path: rel,
@@ -43,10 +59,21 @@ export class LocalInventory {
           size: child.stat.size,
         });
       } else if (child instanceof TFolder) {
-        // Skip the config folder entirely unless configured to include it.
-        if (rel === this.app.vault.configDir && !this.settings.syncVaultConfig) continue;
+        // Config folder policy: sync everything, sync bookmarks only, or skip.
+        if (rel === this.app.vault.configDir) {
+          if (this.settings.syncVaultConfig) {
+            // descend normally (filter still applies inside)
+          } else if (this.settings.syncBookmarks) {
+            await this.walk(child, out, true);
+            continue;
+          } else {
+            continue;
+          }
+        }
+        if (bookmarksOnly) continue; // do not descend into config subfolders
         if (this.isExcluded(rel)) continue;
-        await this.walk(child, out);
+        if (this.pathFilter.shouldSkip(rel)) continue;
+        await this.walk(child, out, false);
       }
     }
   }

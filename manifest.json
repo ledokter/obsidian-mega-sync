@@ -1,7 +1,7 @@
 {
   "id": "mega-sync",
   "name": "MEGA Sync",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "minAppVersion": "1.13.0",
   "description": "Two-way sync between your vault and your MEGA.nz cloud, inspired by Remotely Save.",
   "author": "ledokter",

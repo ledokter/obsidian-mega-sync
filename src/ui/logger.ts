@@ -15,7 +15,7 @@ export class Logger {
   private max: number;
   private keepFile: boolean;
   private enabled: boolean;
-  private plugin: { loadData: () => Promise<any>; saveData: (d: any) => Promise<void> };
+  private plugin: { loadData: () => Promise<Record<string, unknown> | null>; saveData: (d: Record<string, unknown>) => Promise<void> };
   private fileLog: string[] = [];
   private onNotice?: (msg: string, timeout?: number) => void;
 
@@ -73,9 +73,10 @@ export class Logger {
   /** Persist the on-disk log to plugin data.json under `megaSyncLog`. */
   async flushFile(): Promise<void> {
     if (!this.keepFile || this.fileLog.length === 0) return;
-    const data = (await this.plugin.loadData()) || {};
-    const existing: string[] = Array.isArray(data.megaSyncLog) ? data.megaSyncLog : [];
-    const merged = existing.concat(this.fileLog).slice(-2000);
+    const loaded = await this.plugin.loadData();
+    const data: Record<string, unknown> = loaded ?? {};
+    const existing: unknown = data.megaSyncLog;
+    const merged = (Array.isArray(existing) ? (existing as string[]) : []).concat(this.fileLog).slice(-2000);
     data.megaSyncLog = merged;
     await this.plugin.saveData(data);
     this.fileLog = [];
