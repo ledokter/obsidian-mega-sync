@@ -1,7 +1,7 @@
 {
   "name": "obsidian-mega-sync",
   "version": "1.0.0",
-  "description": "Two-way sync between your Obsidian vault and MEGA.nz, inspired by Remotely Save.",
+  "description": "Two-way sync between your Obsidian vault and MEGA.nz.",
   "main": "main.js",
   "type": "module",
   "scripts": {

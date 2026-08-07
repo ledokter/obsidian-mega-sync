@@ -135,7 +135,7 @@ export interface MegaSyncSettings {
   /** Skip files larger than this many MB. 0 = no limit. */
   maxFileMb: number;
   /** Include dotfiles and files inside hidden folders. Dot-prefixed paths are
-   *  skipped by default (like Remotely Save); enable to sync them. */
+   *  skipped by default; enable to sync them. */
   syncHiddenFiles: boolean;
   /** Include files/folders starting with `_` (underscore). Skipped by default. */
   syncUnderscoreItems: boolean;

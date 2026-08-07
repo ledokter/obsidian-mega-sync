@@ -1,128 +1,64 @@
 # MEGA Sync for Obsidian
 
-> Synchronisation bidirectionnelle entre votre vault Obsidian et un dossier sur votre compte **MEGA.nz**, inspirée de **Remotely Save** mais dédiée exclusivement à MEGA.
->
-> Two-way sync between your Obsidian vault and a folder on your **MEGA.nz** account, inspired by **Remotely Save** but restricted to MEGA only.
+> Two-way sync between your Obsidian vault and a folder on your **MEGA.nz** account.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## 🇫🇷 Français
+MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz account. It uses a three-way merge (local state / remote state / last-sync snapshot) so several devices converge toward the same state, and **only supports MEGA.nz** as a backend.
 
-### Qu'est-ce que c'est ?
-
-MEGA Sync synchronise le contenu de votre vault Obsidian avec un dossier de votre compte MEGA.nz. Le plugin reproduit le fonctionnement de [Remotely Save](https://github.com/remotely-save/remotely-save) (synchronisation bidirectionnelle basée sur un instantané de la dernière synchro) mais **n'utilise que MEGA.nz** comme backend.
-
-### Fonctionnalités
-
-- **Sync bidirectionnelle** par merge à trois voies (local / distant / instantané de la dernière synchro), comme Remotely Save.
-- **Déclencheurs** : au démarrage d'Obsidian, à intervalle régulier, après modification du vault (debounce), manuellement (icône du ruban, commande, barre d'état).
-- **Compte MEGA** : email + mot de passe + code 2FA optionnel.
-- **Dossier distant** configurable (dossier de base + sous-dossier), créé automatiquement.
-- **Filtres** : patterns d'exclusion/inclusion (glob `*` / `**`), taille maximale de fichier, inclusion optionnelle du dossier `.obsidian` (config du vault).
-- **Gestion des conflits** : copie de conflit locale et distante (`<fichier>.conflict-<date>.<ext>`), jamais de perte de données.
-- **Suppression sûre** : corbeille (trash) configurable, suppression distante/local réversible.
-- **Instantané partagé** : `_mega_sync_snapshot.json` est stocké sur MEGA afin que plusieurs appareils convergent vers le même état.
-- **Barre d'état + icône du ruban + journal** consultable (commande « Show sync log »).
-- **Verrouillage des réglages** par mot de passe optionnel.
-- **Sens de sync** : bidirectionnel (miroir), upload-only / download-only (miroir strict), ou push-only / pull-only (unidirectionnel sans suppression).
-- **Dry-run** : simuler une sync (commande « Simulate sync ») pour voir le plan sans rien modifier.
-- **Garde de sécurité** : abort automatique si trop de fichiers sont modifiés/supprimés en une seule sync (`protectModifyPercentage`).
-- **Logs activables/désactivables** + bouton **Test read/write** (écrit, relit, vérifie, supprime un fichier test sur MEGA).
-
-### Sécurité & accès au système de fichiers
-
-Le plugin est **desktop uniquement** (`isDesktopOnly: true`). La bibliothèque [`megajs`](https://www.npmjs.com/package/megajs) utilisée pour parler à MEGA emploie les APIs Node.js `crypto` et `Buffer` (le protocole MEGA exige un chiffrement côté client, géré en pure-JS par megajs). L'accès au système de fichiers se limite au **vault Obsidian** et au **dossier de données du plugin** — le plugin ne lit ni n'écrit jamais en dehors de ces limites, à l'exception de la corbeille système (via l'API Obsidian `fileManager.trashFile`) lorsque l'option « Use trash for deletion » est activée. Aucun code distant n'est chargé ; le code source TypeScript complet est publié.
-
-### Installation
-
-1. Dans Obsidian : **Réglages → Modules complémentaires → Désactiver le mode sans échec**, puis **Parcourir**.
-2. Cherchez **MEGA Sync** (une fois publié dans le catalogue communautaire) et installez-le.
-3. **Ou via BRAT** (test bêta) : ajoutez le dépôt `ledokter/obsidian-mega-sync`.
-4. Activez le plugin, puis ouvrez ses réglages et renseignez votre compte MEGA.
-
-### Utilisation rapide
-
-1. **Réglages → MEGA Sync → Email / Password** : vos identifiants MEGA.
-2. **Base folder** : dossier créé à la racine de votre MEGA (défaut `Obsidian-MEGA-Sync`).
-3. Cliquez **Test connection** pour valider.
-4. Cliquez l'icône du ruban ou **Sync now** pour lancer la première synchro.
-
-### Sécurité & confidentialité
-
-- Votre mot de passe MEGA est stocké **localement** dans `data.json` du plugin (dans le dossier `.obsidian/plugins/mega-sync/` de votre vault). Il n'est jamais envoyé ailleurs qu'à l'API MEGA.
-- **Chiffrement au repos** : réglages → Security → « Enable encryption ». Vos identifiants MEGA (email, mot de passe, code 2FA) **et** la session mise en cache sont alors chiffrés en **AES-256-GCM** (clé dérivée par **scrypt** depuis une passphrase maître). La passphrase n'est **jamais** écrite sur disque — elle vit uniquement en mémoire pour la session. Une fois activée, elle verrouille aussi le panneau de réglages.
-- **Persistance de session** : après une première connexion réussie, le plugin met en cache la session MEGA (`sid` + clé, sans le mot de passe). Les syncs suivantes réutilisent cette session et n'envoient plus le mot de passe à MEGA. Si la session expire, le plugin retombe automatiquement sur le login email+password.
-- Le plugin ne charge **aucun code distant** et n'est pas obfusqué (conforme aux [exigences Obsidian](https://docs.obsidian.md/Plugins/Releasing+your+plugin)).
-- **Important** : ne placez pas `data.json` dans un dépôt public.
-
-### Limitations
-
-- MEGA ne fournit pas de date de modification fiable par fichier ; le plugin s'appuie sur l'instantané de synchro pour suivre les `mtime`. Un fichier créé directement sur MEGA (hors plugin) sera vu comme « nouveau distant » et téléchargé.
-- Pas de synchronisation sélective avancée type « règles complexes » au-delà des globs.
-
-### Contributions
-
-PR bienvenues. Voir [CONTRIBUTING](#). Veuillez ouvrir une *issue* avant un changement majeur.
-
-## 🇬🇧 English
-
-MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz account. It reproduces the behaviour of [Remotely Save](https://github.com/remotely-save/remotely-save) (three-way snapshot-based two-way sync) but **only supports MEGA.nz**.
-
-### Features
+## Features
 
 - **Two-way sync** via a three-way merge (local / remote / last-sync snapshot).
+- **Sync direction**: two-way (mirror), upload-only / download-only (strict mirror), or push-only / pull-only (one-way without deletions).
 - **Triggers**: on startup, on an interval, after vault changes (debounced), manually (ribbon / command / status bar).
 - **MEGA account**: email + password + optional 2FA code.
 - Configurable **remote folder** (base folder + sub-folder), auto-created.
-- **Filters**: include/exclude glob patterns, max file size, optional `.obsidian` folder sync.
+- **Filters**: include/exclude glob patterns, regex ignore + regex allowlist, file-type whitelist with presets (Notes, Images, PDF, Audio, Video) + custom extensions, max file size, optional `.obsidian` folder sync, individual `.obsidian/bookmarks.json` sync, dot/underscore hidden-file rules, always-skipped system files (`.git`, `node_modules`, `.DS_Store`, `~$*` Office temp, …).
 - **Conflict handling**: local + remote conflict copies (`<file>.conflict-<date>.<ext>`), never any data loss.
 - **Safe deletion**: trash-aware, reversible remote/local deletion.
+- **Dry run**: simulate a sync (command "Simulate sync") to preview the plan without changing anything.
+- **Safety guard**: abort automatically if too many files would change in a single run (`protectModifyPercentage`).
 - **Shared snapshot**: `_mega_sync_snapshot.json` stored on MEGA so multiple devices converge.
-- **Status bar, ribbon icon, log** view (command "Show sync log").
+- **Status bar, ribbon icon, log** view (command "Show sync log"). The ribbon icon animates while syncing.
+- **Toggleable sync log** (in-memory ring buffer + optional on-disk file).
+- **Test read/write** button: writes a test file to MEGA, reads it back, verifies it, then deletes it.
+- **Pre-sync notification** + optional confirmation modal for manual syncs.
 - Optional **settings lock** with a passphrase.
 
-### Install
+## Install
 
 1. Obsidian → **Settings → Community plugins → Turn off safe mode**, then **Browse**.
 2. Search **MEGA Sync** and install (once accepted in the community catalog).
 3. **Or with BRAT**: add the repo `ledokter/obsidian-mega-sync`.
 4. Enable the plugin, open its settings, enter your MEGA credentials.
 
-### Quick start
+## Quick start
 
 1. Settings → MEGA Sync → Email / Password.
 2. Base folder: created at the root of your MEGA drive (default `Obsidian-MEGA-Sync`).
-3. Click **Test connection**.
-4. Click the ribbon icon or run **Sync now**.
+3. Click **Test read/write** to validate the connection.
+4. Click the ribbon icon or run **Sync now** to start the first sync.
 
-### Security
+## Security & filesystem access
 
+- The plugin is **desktop only** (`isDesktopOnly: true`). The [`megajs`](https://www.npmjs.com/package/megajs) library used to talk to MEGA relies on Node.js `crypto` and `Buffer` (MEGA's protocol requires client-side encryption, handled in pure-JS by megajs). Filesystem access is limited to the **Obsidian vault** and the **plugin's own data folder** — the plugin never reads or writes outside these bounds, except to send deleted files to the system trash via Obsidian's `fileManager.trashFile` API (optional, "Use trash for deletion"). No remote code is loaded; the full TypeScript source is published.
 - Your MEGA password is stored **locally** in the plugin's `data.json` (inside your vault's `.obsidian/plugins/mega-sync/`). It is only ever sent to the MEGA API.
 - **At-rest encryption**: Settings → Security → "Enable encryption". Your MEGA credentials (email, password, 2FA) **and** the cached session are then encrypted with **AES-256-GCM** (key derived via **scrypt** from a master passphrase). The passphrase is **never** written to disk — it lives only in memory for the session. Once set, it also locks the settings panel.
 - **Session persistence**: after a first successful login, the plugin caches the MEGA session (`sid` + key, no password). Subsequent syncs reuse that session and no longer send your password to MEGA. If the session expires, the plugin automatically falls back to email+password login.
-- You can lock the settings panel with a separate passphrase.
 - The plugin loads **no remote code** and is **not obfuscated**, per Obsidian's plugin requirements.
 - Do not commit `data.json` to a public repository.
 
-### Comparison with Remotely Save
+## Limitations
 
-| Feature | Remotely Save | MEGA Sync |
-|---|---|---|
-| Backends | Dropbox, OneDrive, WebDAV, S3… | **MEGA.nz only** |
-| Two-way sync | ✅ | ✅ |
-| Snapshot-based merge | ✅ | ✅ |
-| Session caching (no password re-sent) | ➖ | ✅ |
-| Encrypted secrets at rest (AES-256-GCM) | ➖ | ✅ |
-| Sync on startup / interval / change | ✅ | ✅ |
-| Include/exclude globs | ✅ | ✅ |
-| `.obsidian` sync toggle | ✅ | ✅ |
-| Conflict copies | ✅ | ✅ |
-| Settings password lock | ✅ | ✅ |
-| Status bar / ribbon / log | ✅ | ✅ |
-| Mobile (iOS/Android) | partial | desktop only (Electron) for now |
+- MEGA does not expose a reliable per-file modification time; the plugin relies on the sync snapshot to track `mtime`. A file created directly on MEGA (outside the plugin) is seen as "new remote" and downloaded.
+- Mobile (iOS/Android) is not supported yet — the plugin is desktop only for now.
 
-### License
+## Contributions
+
+PRs welcome. Please open an issue before a major change.
+
+## License
 
 MIT © ledokter

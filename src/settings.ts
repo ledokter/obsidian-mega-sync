@@ -258,7 +258,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           { name: "Ignore paths (regex)", desc: "JavaScript regular expressions (one per line). Paths matching any regex are skipped on both sides, in addition to the glob patterns above. e.g. ^trash/ or \\.(tmp|bak)$", control: { type: "textarea", key: "ignorePathsRegex" } },
           { name: "Only allow paths (regex)", desc: "JavaScript regular expressions (one per line). When non-empty, only paths matching at least one regex are synced. Empty = allow all. Parents of allowed files are auto-allowed.", control: { type: "textarea", key: "onlyAllowPathsRegex" } },
           { name: "Max file size (MB)", desc: "Skip files larger than this. 0 = no limit.", control: { type: "number", key: "maxFileMb" } },
-          { name: "Sync hidden files", desc: "Include dotfiles and files inside dot-prefixed folders. Off by default (dotfiles are skipped, like Remotely Save).", control: { type: "toggle", key: "syncHiddenFiles" } },
+          { name: "Sync hidden files", desc: "Include dotfiles and files inside dot-prefixed folders. Off by default (dotfiles are skipped).", control: { type: "toggle", key: "syncHiddenFiles" } },
           { name: "Sync underscore items", desc: "Include files and folders starting with _ (underscore). Off by default.", control: { type: "toggle", key: "syncUnderscoreItems" } },
         ],
       },

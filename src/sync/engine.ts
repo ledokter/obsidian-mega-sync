@@ -455,8 +455,8 @@ export class SyncEngine {
       }
     }
 
-    // Also keep a local conflict copy of the current local version, mirroring
-    // Remotely Save's "create conflict copies" behaviour.
+    // Also keep a local conflict copy of the current local version, so both
+    // versions survive on the local side too.
     const local = L.get(path);
     if (local) {
       try {

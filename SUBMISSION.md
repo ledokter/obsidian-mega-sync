@@ -14,8 +14,8 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 | Source code on GitHub | ✅ https://github.com/ledokter/obsidian-mega-sync |
 | `manifest.json` complete & compliant | ✅ (id `mega-sync`, no `obsidian` in id, no `fundingUrl`) |
 | `main.js` / `styles.css` built | ✅ |
-| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.2.1 |
-| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.2.1` on `master`) |
+| GitHub release with the 3 assets | ✅ https://github.com/ledokter/obsidian-mega-sync/releases/tag/1.2.2 |
+| `manifest.json` at HEAD of default branch matches latest release | ✅ (`1.2.2` on `master`) |
 | `versions.json` present | ✅ |
 | README + LICENSE | ✅ |
 | At-rest encryption (AES-256-GCM + scrypt) | ✅ |
@@ -38,9 +38,9 @@ Reference: <https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>
 6. Click **Submit**.
 
 The directory reads the `manifest.json` at the HEAD of `master` (currently
-`1.2.1`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
+`1.2.2`) and then pulls `main.js`, `manifest.json`, `styles.css` from the
 GitHub release whose tag matches the manifest version — that release
-(`1.2.1`) is produced automatically by the `release` GitHub Actions workflow,
+(`1.2.2`) is produced automatically by the `release` GitHub Actions workflow,
 which also attests build provenance for the assets.
 
 ## After submission
@@ -66,7 +66,7 @@ Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plug
 - [x] `id` = `mega-sync` — unique, lowercase, does not contain `obsidian`.
 - [x] No `fundingUrl` (no donation channel is configured).
 - [x] `description` ≤ 250 chars, ends with `.`, no emoji, proper capitalization
-      (Obsidian, MEGA.nz, Remotely Save).
+      (Obsidian, MEGA.nz).
 - [x] `minAppVersion` = `1.13.0` (uses the declarative settings API:
       `getSettingDefinitions` / `SettingDefinitionItem`, available since 1.13.0).
 - [x] `isDesktopOnly: true` — the plugin uses Node.js APIs (`crypto`, `Buffer`)
@@ -81,12 +81,12 @@ Per <https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plug
       File access is limited to the Obsidian vault and the plugin's own data
       folder; the only out-of-vault operation is sending deleted files to the
       system trash via Obsidian's `fileManager.trashFile` API (optional). See
-      the "Sécurité & accès au système de fichiers" section in README.md.
-- [x] GitHub release `1.2.1` attaches `main.js`, `manifest.json`, `styles.css`,
+      the "Security & filesystem access" section in README.md.
+- [x] GitHub release `1.2.2` attaches `main.js`, `manifest.json`, `styles.css`,
       with build-provenance attestations.
-- [x] Release tag (`1.2.1`) matches `manifest.json` version (`1.2.1`).
+- [x] Release tag (`1.2.2`) matches `manifest.json` version (`1.2.2`).
 
-## Features (1.2.1)
+## Features (1.2.2)
 
 - Sync direction: two-way mirror (default), upload-only / download-only (strict
   mirror), or push-only / pull-only (one-way without deletions).

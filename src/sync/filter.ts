@@ -1,7 +1,7 @@
 // Shared path filter used by both the local inventory walk and the remote
 // inventory post-filter, so exclusion rules apply consistently on both sides.
 //
-// Model (mirrors Remotely Save's checkIsSkipItemOrNotByName, simplified):
+// Model:
 //   1. always-skipped basenames/folders (.git, node_modules, .DS_Store, …)
 //   2. hidden segments: dot-prefixed (toggle: syncHiddenFiles) and
 //      underscore-prefixed (toggle: syncUnderscoreItems)
