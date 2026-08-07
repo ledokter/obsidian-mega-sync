@@ -22,8 +22,10 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 - **Safe deletion**: trash-aware, reversible remote/local deletion.
 - **Dry run**: simulate a sync (command "Simulate sync") to preview the plan without changing anything.
 - **Safety guard**: abort automatically if too many files would change in a single run (`protectModifyPercentage`).
+- **Per-file timeout**: give up on a single stalled upload/download after N minutes (default 10) instead of hanging the whole sync forever — e.g. a stuck connection or an exhausted MEGA transfer quota.
+- **Live progress**: the ribbon icon fills as a gauge while syncing, with a tooltip / status-bar readout showing percent, done/total, and an ETA. **Stop a running sync** anytime — right-click the ribbon icon, or the "Stop sync" button in the log window; whatever was already synced is kept.
 - **Shared snapshot**: `_mega_sync_snapshot.json` stored on MEGA so multiple devices converge.
-- **Status bar, ribbon icon, log** view (command "Show sync log"). The ribbon icon animates while syncing.
+- **Status bar, ribbon icon, log** view (command "Show sync log") with a live-updating progress row and a "Copy log" button while a sync runs.
 - **Toggleable sync log** (in-memory ring buffer + optional on-disk file).
 - **Test read/write** button: writes a test file to MEGA, reads it back, verifies it, then deletes it.
 - **Pre-sync notification** + optional confirmation modal for manual syncs.
@@ -32,7 +34,7 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 ## Install
 
 1. Obsidian → **Settings → Community plugins → Turn off safe mode**, then **Browse**.
-2. Search **MEGA Sync** and install (once accepted in the community catalog).
+2. Search **MEGA Sync** and install.
 3. **Or with BRAT**: add the repo `ledokter/obsidian-mega-sync`.
 4. Enable the plugin, open its settings, enter your MEGA credentials.
 
