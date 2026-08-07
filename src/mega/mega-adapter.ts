@@ -7,7 +7,7 @@
 //   - List the remote tree into a flat map of vault-relative path -> RemoteFile.
 //   - Upload, download, rename, delete, mkdir.
 //   - Persist / read the sync snapshot on MEGA so multiple devices converge.
-import { Storage, MutableFile } from "megajs";
+import { Storage, MutableFile, UploadStream } from "megajs";
 import { Logger } from "../ui/logger";
 import { joinPath, normalizePath } from "../util";
 import { SyncSnapshot, FileEntry, SessionCache } from "../sync/types";
@@ -123,7 +123,7 @@ export class MegaAdapter {
           storage.name = r.name ?? storage.name;
           storage.user = r.u ?? storage.user;
         }
-        storage.reload(true, (e: Error | null) => {
+        void storage.reload(true, (e: Error | null) => {
           if (e) return reject(new Error(`reload: ${e}`));
           storage.status = "ready";
           resolve();
@@ -238,10 +238,13 @@ export class MegaAdapter {
     if (existing) {
       await existing.delete(false).catch((e) => this.logger.warn(`Could not delete existing remote "${relPath}": ${String(e)}`));
     }
+    // megajs's own .d.ts declares MutableFile#upload() -> Writable (the base
+    // File#upload() signature returning UploadStream, with the `.complete`
+    // promise, is shadowed) — cast through `unknown` like revive() above.
     const upload = folder.upload(
       { name, size: data.length, maxChunkSize: 1024 * 1024 },
       data,
-    );
+    ) as unknown as UploadStream;
     const file = await upload.complete;
     return {
       path: normalizePath(relPath),
@@ -286,8 +289,7 @@ export class MegaAdapter {
       const file = await this.findChild(base, SNAPSHOT_FILE);
       if (!file) return null;
       const buf = await file.downloadBuffer({});
-      const json = JSON.parse(buf.toString("utf8"));
-      return json as SyncSnapshot;
+      return JSON.parse(buf.toString("utf8")) as SyncSnapshot;
     } catch (e) {
       this.logger.warn(`Could not read remote snapshot: ${String(e)}`);
       return null;
@@ -314,7 +316,7 @@ export class MegaAdapter {
       const seg = parts[i];
       let next = await this.findChild(cur, seg);
       if (!next) {
-        next = (await cur.mkdir(seg)) as MutableFile;
+        next = await cur.mkdir(seg);
       }
       await this.ensureLoaded(next);
       cur = next;

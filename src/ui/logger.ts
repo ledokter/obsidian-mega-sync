@@ -20,7 +20,7 @@ export class Logger {
   private onNotice?: (msg: string, timeout?: number) => void;
 
   constructor(
-    plugin: { loadData: () => Promise<any>; saveData: (d: any) => Promise<void> },
+    plugin: { loadData: () => Promise<Record<string, unknown> | null>; saveData: (d: Record<string, unknown>) => Promise<void> },
     settings: MegaSyncSettings,
   ) {
     this.plugin = plugin;

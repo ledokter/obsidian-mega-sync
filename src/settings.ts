@@ -254,7 +254,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           { name: "Video", desc: `Sync video: ${FILE_TYPE_PRESETS.video.exts.join(", ")}.`, visible: () => s.fileTypeMode === "whitelist", control: { type: "toggle", key: "fileTypePresetVideo" } },
           { name: "Custom extensions", desc: "Extra extensions (comma or space separated, no dot) to sync in addition to the presets above. e.g. docx, xlsx, epub", visible: () => s.fileTypeMode === "whitelist", control: { type: "text", key: "fileTypeCustomExt", placeholder: "docx, xlsx, epub" } },
           { name: "Sync vault config", desc: "Include the config folder so settings, themes and plugins are mirrored across devices.", control: { type: "toggle", key: "syncVaultConfig" } },
-          { name: "Sync bookmarks only", desc: "Sync only .obsidian/bookmarks.json without the rest of the config folder. Only effective when 'Sync vault config' is off.", visible: () => !s.syncVaultConfig, control: { type: "toggle", key: "syncBookmarks" } },
+          { name: "Sync bookmarks only", desc: "Sync only bookmarks.json (from the vault's config folder) without the rest of it. Only effective when 'Sync vault config' is off.", visible: () => !s.syncVaultConfig, control: { type: "toggle", key: "syncBookmarks" } },
           { name: "Exclude patterns", desc: "Glob patterns (one per line) of paths to exclude. Supports * and **. e.g. .trash/** or *.tmp", control: { type: "textarea", key: "excludePatterns" } },
           { name: "Include patterns (override)", desc: "Paths matching these patterns are synced even if excluded above.", control: { type: "textarea", key: "includePatterns" } },
           { name: "Ignore paths (regex)", desc: "JavaScript regular expressions (one per line). Paths matching any regex are skipped on both sides, in addition to the glob patterns above. e.g. ^trash/ or \\.(tmp|bak)$", control: { type: "textarea", key: "ignorePathsRegex" } },
@@ -413,7 +413,7 @@ export class LogModal extends Modal {
     this.progressRow = contentEl.createDiv({ cls: "mega-sync-progress-row" });
     this.progressText = this.progressRow.createDiv({ cls: "mega-sync-progress-text" });
     const track = this.progressRow.createDiv({ cls: "mega-sync-progress" });
-    this.progressFill = track.createEl("span");
+    this.progressFill = track.createSpan();
 
     this.logBox = contentEl.createDiv({ cls: "mega-sync-log" });
 

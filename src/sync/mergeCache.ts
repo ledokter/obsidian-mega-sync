@@ -48,7 +48,7 @@ export class MergeCache {
         await this.app.vault.adapter.mkdir(parent);
       }
       const bytes = new TextEncoder().encode(content);
-      const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
       await this.app.vault.adapter.writeBinary(p, ab);
     } catch {
       /* best-effort */

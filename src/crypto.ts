@@ -25,7 +25,7 @@ const IV_LEN = 12;
 const GCM_TAG_LEN = 16;
 
 function assertSubtle(): SubtleCrypto {
-  const s = globalThis.crypto?.subtle;
+  const s = window.crypto?.subtle;
   if (!s) {
     throw new Error(
       "Web Crypto (crypto.subtle) is not available in this context. " +
@@ -59,8 +59,8 @@ function fromBase64(b64: string): Uint8Array {
 /** Encrypt the secrets object. Returns a self-contained blob. */
 export async function encryptSecrets(secrets: Secrets, passphrase: string): Promise<EncryptedBlob> {
   const subtle = assertSubtle();
-  const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_LEN));
-  const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_LEN));
+  const salt = window.crypto.getRandomValues(new Uint8Array(SALT_LEN));
+  const iv = window.crypto.getRandomValues(new Uint8Array(IV_LEN));
   const key = await deriveKey(passphrase, salt);
   const payload = Buffer.from(
     JSON.stringify({ __magic: PAYLOAD_MAGIC, ...secrets }),
@@ -68,7 +68,7 @@ export async function encryptSecrets(secrets: Secrets, passphrase: string): Prom
   );
   const cryptoKey = await subtle.importKey("raw", key as BufferSource, { name: "AES-GCM" }, false, ["encrypt"]);
   // WebCrypto AES-GCM returns ciphertext + 16-byte auth tag appended.
-  const sealed = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, cryptoKey, payload as BufferSource));
+  const sealed = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, cryptoKey, payload));
   const cipher = sealed.slice(0, sealed.length - GCM_TAG_LEN);
   const tag = sealed.slice(sealed.length - GCM_TAG_LEN);
   return {
@@ -98,7 +98,7 @@ export async function decryptSecrets(blob: EncryptedBlob, passphrase: string): P
   sealed.set(tag, cipher.length);
   let plain: Uint8Array;
   try {
-    plain = new Uint8Array(await subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, cryptoKey, sealed as BufferSource));
+    plain = new Uint8Array(await subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, cryptoKey, sealed));
   } catch {
     throw new Error("Wrong master passphrase, or the secrets were tampered with.");
   }

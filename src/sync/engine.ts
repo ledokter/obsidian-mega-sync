@@ -440,7 +440,7 @@ export class SyncEngine {
     switch (op.type) {
       case "upload": {
         const buf = await this.local.read(path);
-        const remote = await this.mega.upload(path, Buffer.from(buf as ArrayBuffer));
+        const remote = await this.mega.upload(path, Buffer.from(buf));
         R.set(path, remote);
         result.uploaded++;
         this.logger.ok(`↑ ${path}`);
@@ -530,7 +530,7 @@ export class SyncEngine {
     }
 
     const encoded = new TextEncoder().encode(merged);
-    const ab = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer;
+    const ab = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength);
     const now = Date.now();
     await this.local.write(path, ab, now);
     const remoteEntry = await this.mega.upload(path, Buffer.from(encoded));

@@ -3,6 +3,12 @@
 // (scryptSync + createCipheriv), and that the new impl round-trips.
 //
 // Run: npx tsx scripts/crypto-roundtrip.ts
+//
+// src/crypto.ts reads `window.crypto` (Obsidian's own lint rule prefers
+// `window` over `globalThis` for popout-window compatibility) — that global
+// only exists in Electron's renderer, not plain Node, so this test-only shim
+// points it at globalThis (which already has Web Crypto since Node 19+).
+(globalThis as unknown as { window: typeof globalThis }).window ??= globalThis;
 import { createCipheriv, scryptSync, randomBytes } from "crypto";
 import { encryptSecrets, decryptSecrets } from "../src/crypto";
 import type { Secrets, EncryptedBlob } from "../src/sync/types";

@@ -390,7 +390,13 @@ export class MegaSyncPlugin extends Plugin {
   }
 
   private buildEngine(mega: MegaAdapter): SyncEngine {
-    return new SyncEngine(this.app, this.settings, mega, this.logger, this.manifest.dir ?? ".obsidian/plugins/mega-sync");
+    return new SyncEngine(
+      this.app,
+      this.settings,
+      mega,
+      this.logger,
+      this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`,
+    );
   }
 
   /** Confirmation modal shown before manual syncs when enabled. */
