@@ -19,6 +19,7 @@ import { SyncEngine } from "./sync/engine";
 import { Logger } from "./ui/logger";
 import { MegaSyncSettingTab, LogModal } from "./settings";
 import { encryptSecrets, decryptSecrets } from "./crypto";
+import { formatDuration } from "./util";
 
 const ICON_ID = "mega-sync-icon";
 const ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
@@ -66,8 +67,14 @@ export class MegaSyncPlugin extends Plugin {
   private ribbonEl?: HTMLElement;
   private statusEl?: HTMLElement;
   private intervalId?: number;
-  private syncing = false;
+  /** True while a sync is in progress. Read by LogModal to show the Stop
+   *  button / live progress. */
+  syncing = false;
   private debounceTimer?: number;
+  private currentEngine?: SyncEngine;
+  private syncStartedAt = 0;
+  /** Latest progress snapshot for the running sync, read by LogModal. */
+  lastProgress?: { done: number; total: number; label: string; etaMs: number };
 
   async onload(): Promise<void> {
     addIcon(ICON_ID, ICON_SVG);
@@ -283,6 +290,15 @@ export class MegaSyncPlugin extends Plugin {
       callback: () => this.openLogModal(),
     });
     this.addCommand({
+      id: "stop-sync",
+      name: "Stop sync",
+      checkCallback: (checking) => {
+        if (!this.syncing) return false;
+        if (!checking) this.stopSync();
+        return true;
+      },
+    });
+    this.addCommand({
       id: "test-connection",
       name: "Test MEGA connection & read/write",
       callback: () => this.testConnection(),
@@ -300,6 +316,18 @@ export class MegaSyncPlugin extends Plugin {
 
   openLogModal(): void {
     new LogModal(this.app, this).open();
+  }
+
+  /** Request the running sync to stop. It finishes the in-flight action (or
+   *  its per-file timeout, see "Per-file timeout" in settings) then halts —
+   *  it cannot cancel an already-hung network request outright, but bounds
+   *  how long that takes instead of waiting forever. Whatever was already
+   *  synced is kept. */
+  stopSync(): void {
+    if (!this.syncing || !this.currentEngine) return;
+    this.currentEngine.abort();
+    this.logger.warn("Stop requested — finishing the current action, then halting.");
+    new Notice("MEGA Sync — stopping after the current action…", 5000);
   }
 
   // ----- Triggers ----------------------------------------------------------
@@ -422,8 +450,28 @@ export class MegaSyncPlugin extends Plugin {
     this.syncing = true;
     this.setStatus("syncing…", "syncing");
     this.ribbonEl?.addClass("syncing");
+    this.syncStartedAt = Date.now();
+    this.lastProgress = undefined;
     const mega = this.buildAdapter();
     const engine = new SyncEngine(this.app, this.settings, mega, this.logger);
+    this.currentEngine = engine;
+    engine.setProgress((done, total, label) => {
+      const elapsed = Date.now() - this.syncStartedAt;
+      const etaMs = done > 0 ? (elapsed / done) * (total - done) : NaN;
+      this.lastProgress = { done, total, label, etaMs };
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      this.setStatus(
+        `syncing ${pct}% (${done}/${total}) — ~${formatDuration(etaMs)} left`,
+        "syncing",
+      );
+      if (this.ribbonEl) {
+        this.ribbonEl.style.setProperty("--mega-progress", String(total > 0 ? done / total : 0));
+        this.ribbonEl.setAttribute(
+          "aria-label",
+          `MEGA Sync — ${pct}% (${done}/${total}), ~${formatDuration(etaMs)} left`,
+        );
+      }
+    });
 
     try {
       const result: SyncResult = await engine.run();
@@ -454,9 +502,16 @@ export class MegaSyncPlugin extends Plugin {
       }
 
       this.setStatus(
-        `synced ${new Date().toLocaleTimeString()} (↑${result.uploaded} ↓${result.downloaded})`,
+        `${result.stopped ? "stopped" : "synced"} ${new Date().toLocaleTimeString()} ` +
+          `(↑${result.uploaded} ↓${result.downloaded})`,
       );
-      if (result.errors > 0) {
+      if (result.stopped) {
+        new Notice(
+          `MEGA Sync stopped — ↑${result.uploaded} ↓${result.downloaded} ` +
+            `delR:${result.deletedRemote} delL:${result.deletedLocal}. Progress was saved.`,
+          8000,
+        );
+      } else if (result.errors > 0) {
         new Notice(`MEGA Sync finished with ${result.errors} error(s). Open the log.`, 8000);
       } else if (!automatic) {
         new Notice(
@@ -473,7 +528,11 @@ export class MegaSyncPlugin extends Plugin {
     } finally {
       await mega.close();
       this.syncing = false;
+      this.currentEngine = undefined;
+      this.lastProgress = undefined;
       this.ribbonEl?.removeClass("syncing");
+      this.ribbonEl?.style.removeProperty("--mega-progress");
+      this.ribbonEl?.setAttribute("aria-label", "MEGA Sync — sync now");
     }
   }
 

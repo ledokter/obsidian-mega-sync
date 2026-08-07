@@ -112,3 +112,15 @@ export function humanSize(bytes: number): string {
 export function nowStamp(): string {
   return new Date().toISOString().replace("T", " ").replace("Z", "");
 }
+
+/** Human-readable duration, e.g. "42s", "3m12s", "1h05m". */
+export function formatDuration(ms: number): string {
+  if (!isFinite(ms) || ms < 0) return "?";
+  const totalSec = Math.round(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}

@@ -8,6 +8,7 @@
 import { App, PluginSettingTab, Setting, Modal, Notice, SettingDefinitionItem } from "obsidian";
 import { MegaSyncPlugin } from "./main";
 import { DEFAULT_SETTINGS, FILE_TYPE_PRESETS } from "./sync/types";
+import { formatDuration } from "./util";
 
 const CRED_KEYS = ["email", "secondFactorCode"] as const;
 type CredKey = (typeof CRED_KEYS)[number];
@@ -272,6 +273,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
           { name: "Conflict folder", desc: "Name of the local folder where conflict copies are stored.", control: { type: "text", key: "conflictFolder" } },
           { name: "Use trash for deletion", desc: "Move deleted local files to the system trash instead of deleting permanently.", control: { type: "toggle", key: "useTrashForDeletion" } },
           { name: "Max % of files changed per sync", desc: "Abort the sync if more than this % of all files would be modified or deleted in a single run. Safety guard against mass deletions (e.g. a wrongly-empty vault). 0 = always block, 100 = disabled.", control: { type: "number", key: "protectModifyPercentage" } },
+          { name: "Per-file timeout (minutes)", desc: "Give up on a single upload/download after this long and move on, instead of hanging forever (e.g. a stalled connection or an exhausted MEGA transfer quota). Doesn't cancel the stuck request, just stops waiting on it — use \"Stop sync\" (log window) to end the whole run.", control: { type: "number", key: "opTimeoutMinutes" } },
         ],
       },
 
@@ -379,9 +381,18 @@ export class MegaSyncSettingTab extends PluginSettingTab {
   }
 }
 
-/** Modal showing the recent sync log lines. */
+/** Modal showing the recent sync log lines, with a copy button, a live
+ *  progress readout, and a stop button while a sync is running. */
 export class LogModal extends Modal {
   plugin: MegaSyncPlugin;
+  private logBox!: HTMLElement;
+  private progressRow!: HTMLElement;
+  private progressText!: HTMLElement;
+  private progressFill!: HTMLElement;
+  private stopBtn!: HTMLButtonElement;
+  private refreshTimer?: number;
+  private lastLineCount = -1;
+
   constructor(app: App, plugin: MegaSyncPlugin) {
     super(app);
     this.plugin = plugin;
@@ -391,14 +402,63 @@ export class LogModal extends Modal {
     const { contentEl } = this;
     this.titleEl.setText("MEGA Sync — log");
     this.modalEl.addClass("mega-sync-log-modal");
-    const box = contentEl.createDiv({ cls: "mega-sync-log" });
-    for (const line of this.plugin.logger.getLines()) {
-      box.createDiv({ cls: `log-${line.level}`, text: `[${line.stamp}] ${line.text}` });
+
+    const toolbar = contentEl.createDiv({ cls: "mega-sync-log-toolbar" });
+    const copyBtn = toolbar.createEl("button", { text: "Copy log" });
+    copyBtn.onclick = () => this.copyLog();
+    this.stopBtn = toolbar.createEl("button", { text: "Stop sync", cls: "mod-warning" });
+    this.stopBtn.onclick = () => this.plugin.stopSync();
+
+    this.progressRow = contentEl.createDiv({ cls: "mega-sync-progress-row" });
+    this.progressText = this.progressRow.createDiv({ cls: "mega-sync-progress-text" });
+    const track = this.progressRow.createDiv({ cls: "mega-sync-progress" });
+    this.progressFill = track.createEl("span");
+
+    this.logBox = contentEl.createDiv({ cls: "mega-sync-log" });
+
+    this.render(true);
+    this.refreshTimer = window.setInterval(() => this.render(false), 1000);
+  }
+
+  private copyLog(): void {
+    const lines = this.plugin.logger.getLines();
+    const text = lines.map((l) => `[${l.stamp}] ${l.level.toUpperCase()} ${l.text}`).join("\n");
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => new Notice(`Copied ${lines.length} log line(s) to the clipboard.`, 3000))
+      .catch(() => new Notice("Could not copy the log — clipboard access denied.", 4000));
+  }
+
+  private render(force: boolean): void {
+    // Progress row: only visible while a sync is running.
+    const syncing = this.plugin.syncing;
+    this.progressRow.toggleClass("mega-hidden", !syncing);
+    this.stopBtn.toggleClass("mega-hidden", !syncing);
+    if (syncing) {
+      const p = this.plugin.lastProgress;
+      const done = p?.done ?? 0;
+      const total = p?.total ?? 0;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      this.progressFill.style.width = `${pct}%`;
+      const eta = p && isFinite(p.etaMs) ? `~${formatDuration(p.etaMs)} left` : "estimating…";
+      this.progressText.setText(p ? `${pct}% (${done}/${total}) — ${eta}` : "starting…");
     }
-    box.scrollTop = box.scrollHeight;
+
+    // Log lines: only re-render when the line count changed (or forced),
+    // and only auto-scroll if the user was already at (or near) the bottom.
+    const lines = this.plugin.logger.getLines();
+    if (!force && lines.length === this.lastLineCount) return;
+    const wasAtBottom = this.logBox.scrollTop + this.logBox.clientHeight >= this.logBox.scrollHeight - 20;
+    this.lastLineCount = lines.length;
+    this.logBox.empty();
+    for (const line of lines) {
+      this.logBox.createDiv({ cls: `log-${line.level}`, text: `[${line.stamp}] ${line.text}` });
+    }
+    if (force || wasAtBottom) this.logBox.scrollTop = this.logBox.scrollHeight;
   }
 
   onClose(): void {
+    if (this.refreshTimer) window.clearInterval(this.refreshTimer);
     this.contentEl.empty();
   }
 }

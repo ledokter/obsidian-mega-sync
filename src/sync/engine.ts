@@ -22,6 +22,7 @@ export class SyncEngine {
   private local: LocalInventory;
   private logger: Logger;
   private progress?: (done: number, total: number, label: string) => void;
+  private aborted = false;
 
   constructor(
     app: App,
@@ -40,6 +41,13 @@ export class SyncEngine {
     this.progress = fn;
   }
 
+  /** Request the current/next run to stop after the in-flight action (or its
+   *  per-file timeout) settles. Whatever was already synced is kept — the
+   *  snapshot is still rewritten to reflect it. */
+  abort(): void {
+    this.aborted = true;
+  }
+
   /** Run a full sync cycle. Throws on fatal errors. When `dry` is true, the
    *  plan is computed and logged but no write/delete is performed and the
    *  snapshot is not updated. */
@@ -55,6 +63,7 @@ export class SyncEngine {
       errors: 0,
       durationMs: 0,
       bootstrapped: false,
+      stopped: false,
     };
 
     await this.mega.connect();
@@ -135,19 +144,35 @@ export class SyncEngine {
     // Execute (skipped in dry-run mode).
     if (!dry) {
       const total = plan.length;
+      const timeoutMs = Math.max(1, this.settings.opTimeoutMinutes) * 60_000;
       let done = 0;
       for (const op of plan) {
+        if (this.aborted) {
+          result.stopped = true;
+          this.logger.warn(`Sync stopped by user after ${done}/${total} actions.`);
+          break;
+        }
         done++;
         this.progress?.(done, total, op.path);
         try {
-          await this.execute(op, L, R, snapshot.files, result);
+          await Promise.race([
+            this.execute(op, L, R, snapshot.files, result),
+            new Promise<never>((_, reject) => {
+              window.setTimeout(
+                () => reject(new Error(`Timed out after ${this.settings.opTimeoutMinutes}min (stalled connection?)`)),
+                timeoutMs,
+              );
+            }),
+          ]);
         } catch (e) {
           result.errors++;
           this.logger.error(`Failed: ${op.type} ${op.path}`, e);
         }
       }
 
-      // Rewrite the snapshot to the new merged state.
+      // Rewrite the snapshot to the merged state reached so far, even if the
+      // run was stopped early or some actions timed out — nothing already
+      // synced needs to be redone next time.
       this.rebuildSnapshot(snapshot, L, R);
       snapshot.savedAt = Date.now();
       await this.mega.writeSnapshot(snapshot);

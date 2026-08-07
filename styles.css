@@ -6,14 +6,39 @@
   color: var(--text-muted);
 }
 
+/* Note: the icon itself no longer spins while syncing — a spinning box would
+   drag the progress-gauge pseudo-elements below around with it (they share
+   the same transformed rendering box). The accent color + filling gauge is
+   the "syncing" cue instead. */
 .mega-sync-ribbon.syncing {
   color: var(--interactive-accent);
-  animation: mega-sync-spin 1s linear infinite;
+  position: relative;
 }
 
-@keyframes mega-sync-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+/* Progress gauge under the ribbon icon: a thin bar that fills left-to-right
+   as --mega-progress (0..1, set from JS) increases. */
+.mega-sync-ribbon.syncing::after {
+  content: "";
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: 2px;
+  height: 2px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+}
+
+.mega-sync-ribbon.syncing::before {
+  content: "";
+  position: absolute;
+  left: 15%;
+  bottom: 2px;
+  height: 2px;
+  width: calc((100% - 30%) * var(--mega-progress, 0));
+  background: var(--interactive-accent);
+  border-radius: 2px;
+  z-index: 1;
+  transition: width 0.3s ease;
 }
 
 .mega-sync-statusbar {
@@ -30,6 +55,25 @@
   height: var(--log-height);
 }
 
+.mega-sync-log-toolbar {
+  display: flex;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.mega-sync-progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.mega-sync-progress-text {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .mega-sync-log {
   font-family: var(--font-monospace);
   font-size: var(--font-ui-smaller);
@@ -37,7 +81,7 @@
   word-break: break-word;
   overflow: auto;
   padding: var(--size-4-2);
-  height: calc(var(--log-height) - 80px);
+  height: calc(var(--log-height) - 140px);
 }
 
 .mega-sync-log .log-error { color: var(--text-error); }

@@ -143,6 +143,11 @@ export interface MegaSyncSettings {
    *  deleted in a single run. 0 = always block, 100 = disabled. Safety guard
    *  against mass deletions (e.g. a wrongly-empty vault). */
   protectModifyPercentage: number;
+  /** Give up on a single upload/download after this many minutes and move on
+   *  to the next action, instead of waiting forever on a stalled connection
+   *  (e.g. an exhausted MEGA transfer quota). Does not cancel the underlying
+   *  network request, just stops the sync loop from waiting on it. */
+  opTimeoutMinutes: number;
 
   /** File-type filter mode. `all` syncs every type; `whitelist` syncs only
    *  the extensions selected via the presets + custom list below. Excluded
@@ -224,6 +229,7 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   syncHiddenFiles: true,
   syncUnderscoreItems: false,
   protectModifyPercentage: 50,
+  opTimeoutMinutes: 10,
   fileTypeMode: "all",
   fileTypePresetNotes: false,
   fileTypePresetImages: false,
@@ -268,4 +274,6 @@ export interface SyncResult {
   /** True if this run was an auto-bootstrap (first download into an empty
    *  vault). The caller flips `bootstrapped` and switches to two-way. */
   bootstrapped: boolean;
+  /** True if the run was cut short by a user-requested stop. */
+  stopped: boolean;
 }
