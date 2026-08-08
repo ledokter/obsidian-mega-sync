@@ -555,6 +555,24 @@ export class SyncEngine {
   ): Promise<void> {
     const localEntry = L.get(path);
     const remoteEntry = R.get(path);
+
+    // Fast path: same size on both sides. Overwhelmingly the common case for
+    // a backlog of historical false conflicts (both sides already hold the
+    // same content, only the snapshot lost track of it) — skip the network
+    // round-trip (download-to-compare for text, or rename-and-duplicate for
+    // everything else) entirely. Same size-as-proxy-for-equal heuristic
+    // already used in plan() for the no-snapshot case; a same-size-but-
+    // different-content collision is possible but rare, and the alternative
+    // — redownloading and/or duplicating thousands of already-identical
+    // files every run — was making syncs on large backlogs impractically
+    // slow (new local changes could never be reached before a device
+    // suspended the sync).
+    if (localEntry && remoteEntry && localEntry.size === remoteEntry.size) {
+      result.merged++;
+      this.logger.ok(`⇄ "${path}" — same size on both sides, treated as already in sync.`);
+      return;
+    }
+
     if (localEntry && remoteEntry) {
       try {
         if (await this.tryAutoMerge(path, localEntry, remoteEntry, L, R, result)) return;
