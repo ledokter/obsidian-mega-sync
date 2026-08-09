@@ -13,6 +13,7 @@ import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult, SyncOp, FILE_TYP
 import { PathFilter } from "./filter";
 import { attemptTextMerge, isMergeableText } from "./textMerge";
 import { MergeCache } from "./mergeCache";
+import { hashContent } from "./hash";
 
 const SNAPSHOT_VERSION = 1;
 const MTIME_TOLERANCE_MS = 1500;
@@ -69,7 +70,9 @@ export class SyncEngine {
       errors: 0,
       durationMs: 0,
       bootstrapped: false,
+      bootstrapDirection: null,
       stopped: false,
+      transfers: [],
     };
 
     await this.mega.connect();
@@ -105,18 +108,33 @@ export class SyncEngine {
 
     // Auto-bootstrap: empty local vault + non-empty remote + no prior
     // snapshot -> force a download-only first sync so the vault is populated
-    // from MEGA. The caller switches to two-way afterwards.
+    // from MEGA. The caller switches to two-way afterwards. Symmetrically,
+    // a non-empty local vault + empty remote + no prior snapshot (the very
+    // first device to ever sync this vault) forces an upload-only first sync
+    // so MEGA gets a full initial copy. Only one of the two can apply.
     const emptyLocal = L.size === 0;
     const hasRemote = R.size > 0;
     const noSnapshot = Object.keys(snapshot.files).length === 0;
-    const bootstrap = !!this.settings.autoBootstrapEmptyVault
+    const pullBootstrap = !!this.settings.autoBootstrapEmptyVault
       && !this.settings.bootstrapped
       && emptyLocal && hasRemote && noSnapshot;
-    const effectiveDir = bootstrap ? "download-only" : this.settings.syncDirection;
-    if (bootstrap) {
+    const pushBootstrap = !!this.settings.autoBootstrapEmptyVault
+      && !this.settings.bootstrapped
+      && !pullBootstrap
+      && !emptyLocal && !hasRemote && noSnapshot;
+    const isBootstrap = pullBootstrap || pushBootstrap;
+    const effectiveDir = pullBootstrap ? "download-only" : pushBootstrap ? "upload-only" : this.settings.syncDirection;
+    if (pullBootstrap) {
       result.bootstrapped = true;
+      result.bootstrapDirection = "pull";
       this.logger.info(
         "First sync: local vault is empty and MEGA has files — bootstrapping (download-only). Two-way sync will resume afterwards.",
+      );
+    } else if (pushBootstrap) {
+      result.bootstrapped = true;
+      result.bootstrapDirection = "push";
+      this.logger.info(
+        "First sync: local vault has files and MEGA is empty — bootstrapping (upload-only) to create the initial cloud copy. Two-way sync will resume afterwards.",
       );
     }
 
@@ -141,9 +159,9 @@ export class SyncEngine {
     }
 
     // Safety guard: abort if too many files would change in one run. A
-    // bootstrap is exempt: the vault is empty, every op is a local creation,
-    // so nothing can be lost.
-    if (!dry && !bootstrap) {
+    // bootstrap is exempt: one side is empty, every op is a fresh copy in a
+    // single direction, so nothing can be lost.
+    if (!dry && !isBootstrap) {
       this.guardModifyPercentage(plan, L, R);
     }
 
@@ -442,7 +460,11 @@ export class SyncEngine {
         const buf = await this.local.read(path);
         const remote = await this.mega.upload(path, Buffer.from(buf));
         R.set(path, remote);
+        const hash = await hashContent(buf, this.settings.verifyContentHash);
+        const prevL = L.get(path);
+        L.set(path, { path, mtime: prevL?.mtime ?? Date.now(), size: buf.byteLength, hash });
         result.uploaded++;
+        result.transfers.push({ path, direction: "upload", at: Date.now() });
         this.logger.ok(`↑ ${path}`);
         if (isMergeableText(path, buf.byteLength)) {
           await this.mergeCache.set(path, new TextDecoder("utf-8").decode(buf));
@@ -453,12 +475,15 @@ export class SyncEngine {
         const buf = await this.mega.download(path);
         const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
         await this.local.write(path, ab);
+        const hash = await hashContent(ab, this.settings.verifyContentHash);
         L.set(path, {
           path,
           mtime: R.get(path)?.mtime ?? Date.now(),
           size: buf.length,
+          hash,
         });
         result.downloaded++;
+        result.transfers.push({ path, direction: "download", at: Date.now() });
         this.logger.ok(`↓ ${path}`);
         if (isMergeableText(path, buf.length)) {
           await this.mergeCache.set(path, new TextDecoder("utf-8").decode(buf));
@@ -469,6 +494,7 @@ export class SyncEngine {
         await this.mega.deleteRemote(path);
         R.delete(path);
         result.deletedRemote++;
+        result.transfers.push({ path, direction: "deleteRemote", at: Date.now() });
         this.logger.ok(`×R ${path}`);
         await this.mergeCache.remove(path);
         break;
@@ -477,6 +503,7 @@ export class SyncEngine {
         await this.local.delete(path, this.settings.useTrashForDeletion);
         L.delete(path);
         result.deletedLocal++;
+        result.transfers.push({ path, direction: "deleteLocal", at: Date.now() });
         this.logger.ok(`×L ${path}`);
         await this.mergeCache.remove(path);
         break;
@@ -534,9 +561,11 @@ export class SyncEngine {
     const now = Date.now();
     await this.local.write(path, ab, now);
     const remoteEntry = await this.mega.upload(path, Buffer.from(encoded));
-    L.set(path, { path, mtime: now, size: encoded.length });
+    const hash = await hashContent(ab, this.settings.verifyContentHash);
+    L.set(path, { path, mtime: now, size: encoded.length, hash });
     R.set(path, remoteEntry);
     result.merged++;
+    result.transfers.push({ path, direction: "upload", at: Date.now() });
     this.logger.ok(`⇄ Auto-merged "${path}" (non-overlapping changes on both sides)${ancestor ? "" : " [no cached ancestor — used a reconstructed one]"}.`);
     await this.mergeCache.set(path, merged);
     return true;
@@ -629,7 +658,11 @@ export class SyncEngine {
         const buf = await this.local.read(path);
         const remote2 = await this.mega.upload(path, Buffer.from(buf));
         R.set(path, remote2);
+        const hash = await hashContent(buf, this.settings.verifyContentHash);
+        const prevL = L.get(path);
+        L.set(path, { path, mtime: prevL?.mtime ?? Date.now(), size: buf.byteLength, hash });
         result.uploaded++;
+        result.transfers.push({ path, direction: "upload", at: Date.now() });
         this.logger.ok(`↑ ${path} (after conflict)`);
       } catch (e) {
         this.logger.error(`Could not re-upload "${path}" after conflict.`, e);
@@ -648,11 +681,14 @@ export class SyncEngine {
     for (const [path, l] of L) {
       const r = R.get(path);
       // Prefer the local mtime (authoritative for local edits); keep size from
-      // whichever side matches.
+      // whichever side matches. The hash (when known) always comes from L —
+      // it's only ever captured at transfer time, on the buffer that just
+      // passed through this device (see execute()).
       files[path] = {
         path,
         mtime: l.mtime,
         size: r ? r.size : l.size,
+        hash: l.hash,
       };
     }
     // Any remote file not present locally (e.g. conflict copies we just
@@ -665,8 +701,15 @@ export class SyncEngine {
     snapshot.files = files;
   }
 
-  /** Has an entry changed relative to the snapshot? */
+  /** Has an entry changed relative to the snapshot? When both sides carry a
+   *  content hash (captured at a previous transfer — see execute()), it is
+   *  authoritative and decides the comparison outright: it's the only signal
+   *  immune to local mtimes not being settable on write (see
+   *  LocalInventory.write). Otherwise falls back to size+mtime. Remote
+   *  entries never carry a hash of their own (comparing would require a
+   *  re-download), so this mainly hardens the local-side comparison. */
   private changed(a: FileEntry, b: FileEntry): boolean {
+    if (a.hash && b.hash) return a.hash !== b.hash;
     if (a.size !== b.size) return true;
     if (Math.abs(a.mtime - b.mtime) > MTIME_TOLERANCE_MS) return true;
     return false;

@@ -104,6 +104,53 @@
   transition: width 0.2s ease;
 }
 
+.mega-sync-firstsync-modal {
+  --fs-width: 480px;
+}
+
+.mega-sync-firstsync-modal .modal {
+  width: min(var(--fs-width), 90vw);
+}
+
+.mega-sync-firstsync-modal h4 {
+  margin-bottom: var(--size-4-1);
+}
+
+.mega-sync-firstsync-modal ul {
+  margin-top: 0;
+}
+
+.mega-sync-report-modal {
+  --report-width: 60vw;
+  --report-height: 70vh;
+}
+
+.mega-sync-report-modal .modal {
+  width: var(--report-width);
+  max-height: var(--report-height);
+}
+
+.mega-sync-report-summary {
+  margin-bottom: var(--size-4-2);
+}
+
+.mega-sync-report-list {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  max-height: 30vh;
+  margin-bottom: var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2);
+}
+
+.mega-sync-report-row {
+  padding: 2px 0;
+}
+
 /* Layout helpers used by the settings UI (avoid inline styles). */
 .mega-input-full { width: 100%; }
 .mega-textarea-full { width: 100%; }

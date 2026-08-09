@@ -20,6 +20,9 @@ import { Logger } from "./ui/logger";
 import { MegaSyncSettingTab, LogModal } from "./settings";
 import { encryptSecrets, decryptSecrets } from "./crypto";
 import { formatDuration } from "./util";
+import { requestWakeLock, WakeLockHandle } from "./ui/wakeLock";
+import { FirstSyncModal } from "./ui/firstSyncModal";
+import { SyncReportModal } from "./ui/reportModal";
 
 const ICON_ID = "mega-sync-icon";
 const ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
@@ -75,6 +78,9 @@ export class MegaSyncPlugin extends Plugin {
   private syncStartedAt = 0;
   /** Latest progress snapshot for the running sync, read by LogModal. */
   lastProgress?: { done: number; total: number; label: string; etaMs: number };
+  /** Held for the duration of a first sync (see FirstSyncModal), released in
+   *  startSync()'s finally block. */
+  private wakeLock?: WakeLockHandle;
 
   async onload(): Promise<void> {
     addIcon(ICON_ID, ICON_SVG);
@@ -298,6 +304,11 @@ export class MegaSyncPlugin extends Plugin {
       callback: () => this.openLogModal(),
     });
     this.addCommand({
+      id: "show-sync-report",
+      name: "Show sync report",
+      callback: () => this.openSyncReportModal(),
+    });
+    this.addCommand({
       id: "stop-sync",
       name: "Stop sync",
       checkCallback: (checking) => {
@@ -324,6 +335,10 @@ export class MegaSyncPlugin extends Plugin {
 
   openLogModal(): void {
     new LogModal(this.app, this).open();
+  }
+
+  openSyncReportModal(): void {
+    new SyncReportModal(this.app, this).open();
   }
 
   /** Request the running sync to stop. It finishes the in-flight action (or
@@ -465,6 +480,14 @@ export class MegaSyncPlugin extends Plugin {
       new Notice(`MEGA Sync — ${directionLabel(this.settings.syncDirection)}…`, 3000);
     }
 
+    // First sync for this vault (either bootstrap direction, or none if both
+    // sides happened to be empty): it can take a while, so warn the user —
+    // this matters most on mobile, where the OS may suspend the app.
+    if (!this.settings.bootstrapped) {
+      new FirstSyncModal(this.app).open();
+      this.wakeLock = (await requestWakeLock()) ?? undefined;
+    }
+
     this.syncing = true;
     this.setStatus("syncing…", "syncing");
     this.ribbonEl?.addClass("syncing");
@@ -503,20 +526,51 @@ export class MegaSyncPlugin extends Plugin {
       }
 
       this.settings.lastSnapshot = (await mega.readSnapshot()) ?? this.settings.lastSnapshot;
+
+      // Record this run in the persisted history (survives restarts) —
+      // surfaced by the "Show sync report" command/button.
+      this.settings.syncHistory = [
+        {
+          startedAt: this.syncStartedAt,
+          durationMs: result.durationMs,
+          dry: false,
+          stopped: result.stopped,
+          bootstrapDirection: result.bootstrapDirection,
+          uploaded: result.uploaded,
+          downloaded: result.downloaded,
+          deletedRemote: result.deletedRemote,
+          deletedLocal: result.deletedLocal,
+          conflicts: result.conflicts,
+          merged: result.merged,
+          skipped: result.skipped,
+          errors: result.errors,
+        },
+        ...this.settings.syncHistory,
+      ].slice(0, 50);
+      this.settings.recentTransfers = [...result.transfers, ...this.settings.recentTransfers].slice(0, 200);
+
       await this.saveSettings();
       await this.logger.flushFile();
 
-      // Auto-bootstrap: the first sync into an empty vault downloaded
-      // everything from MEGA. Mark bootstrapped and switch to two-way sync.
-      if (result.bootstrapped) {
+      // Auto-bootstrap: the first sync into an untouched vault transferred
+      // everything in one direction (pull from MEGA, or push to it if this is
+      // the first device ever to sync). Mark bootstrapped and switch to
+      // two-way sync.
+      if (result.bootstrapDirection) {
         this.settings.bootstrapped = true;
         this.settings.syncDirection = "two-way";
         await this.saveSettings();
-        new Notice(
-          "MEGA Sync — bootstrap complete: vault downloaded. Two-way sync enabled for next syncs.",
-          8000,
-        );
-        this.logger.ok("Bootstrap complete — switched to two-way sync.");
+        const msg = result.bootstrapDirection === "pull"
+          ? "MEGA Sync — bootstrap complete: vault downloaded. Two-way sync enabled for next syncs."
+          : "MEGA Sync — bootstrap complete: vault uploaded as the initial cloud copy. Two-way sync enabled for next syncs.";
+        new Notice(msg, 8000);
+        this.logger.ok(`Bootstrap complete (${result.bootstrapDirection}) — switched to two-way sync.`);
+      } else if (!this.settings.bootstrapped) {
+        // Neither direction was needed (e.g. both sides were empty) — mark
+        // the vault as past its first-sync phase anyway, so the first-sync
+        // notice/wake-lock (see below) doesn't keep re-triggering forever.
+        this.settings.bootstrapped = true;
+        await this.saveSettings();
       }
 
       this.setStatus(
@@ -548,6 +602,8 @@ export class MegaSyncPlugin extends Plugin {
       this.syncing = false;
       this.currentEngine = undefined;
       this.lastProgress = undefined;
+      this.wakeLock?.release();
+      this.wakeLock = undefined;
       this.ribbonEl?.removeClass("syncing");
       this.ribbonEl?.style.removeProperty("--mega-progress");
       this.ribbonEl?.setAttribute("aria-label", "MEGA Sync — sync now (right-click to stop)");

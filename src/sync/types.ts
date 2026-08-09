@@ -8,6 +8,13 @@ export interface FileEntry {
   mtime: number;
   /** Size in bytes. */
   size: number;
+  /** Content hash (BLAKE3, hex), captured opportunistically at transfer
+   *  time (upload/download). Optional: absent for entries never transferred
+   *  through this plugin, for snapshots written before this field existed,
+   *  and for files above the hashing size cap. When present on both sides
+   *  of a comparison it is authoritative over mtime, which is not reliably
+   *  settable on write (see LocalInventory.write). */
+  hash?: string;
 }
 
 /**
@@ -199,6 +206,42 @@ export interface MegaSyncSettings {
 
   /** Last snapshot kept locally for resync. */
   lastSnapshot?: SyncSnapshot;
+
+  /** Use content hashes (when available) to detect local changes instead of
+   *  relying solely on mtime, which the plugin cannot reliably set on write. */
+  verifyContentHash: boolean;
+
+  /** Persisted history of recent sync runs (newest first, capped). Survives
+   *  Obsidian restarts — surfaced by the "Show sync report" modal. */
+  syncHistory: SyncRunSummary[];
+  /** Persisted history of recent individual file transfers (newest first,
+   *  capped). */
+  recentTransfers: TransferRecord[];
+}
+
+/** A single file transfer (or deletion) executed during a sync run. */
+export interface TransferRecord {
+  path: string;
+  direction: "upload" | "download" | "deleteRemote" | "deleteLocal";
+  /** Epoch milliseconds when the transfer completed. */
+  at: number;
+}
+
+/** Persisted summary of one completed sync run, for the sync report. */
+export interface SyncRunSummary {
+  startedAt: number;
+  durationMs: number;
+  dry: boolean;
+  stopped: boolean;
+  bootstrapDirection: "pull" | "push" | null;
+  uploaded: number;
+  downloaded: number;
+  deletedRemote: number;
+  deletedLocal: number;
+  conflicts: number;
+  merged: number;
+  skipped: number;
+  errors: number;
 }
 
 export const DEFAULT_SETTINGS: MegaSyncSettings = {
@@ -252,6 +295,9 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   confirmLocalDeletion: true,
   autoBootstrapEmptyVault: true,
   bootstrapped: false,
+  verifyContentHash: true,
+  syncHistory: [],
+  recentTransfers: [],
 };
 
 /** Whitelist presets for the file-type filter. The keys match the boolean
@@ -279,9 +325,18 @@ export interface SyncResult {
   skipped: number;
   errors: number;
   durationMs: number;
-  /** True if this run was an auto-bootstrap (first download into an empty
-   *  vault). The caller flips `bootstrapped` and switches to two-way. */
+  /** True if this run was an auto-bootstrap (first full transfer, either
+   *  direction, for an untouched vault). The caller flips `bootstrapped` and
+   *  switches to two-way. */
   bootstrapped: boolean;
+  /** Which direction the bootstrap ran, if any: "pull" (empty local vault,
+   *  downloaded everything from MEGA) or "push" (empty remote, uploaded
+   *  everything as the initial cloud copy). Null for an ordinary sync. */
+  bootstrapDirection: "pull" | "push" | null;
   /** True if the run was cut short by a user-requested stop. */
   stopped: boolean;
+  /** Every transfer/deletion actually executed this run, in order. Used to
+   *  build the persisted "recent transfers" history — transient, not capped
+   *  here (the caller caps it before persisting). */
+  transfers: TransferRecord[];
 }

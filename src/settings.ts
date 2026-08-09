@@ -219,7 +219,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
               },
             },
           },
-          { name: "Auto bootstrap empty vault", desc: "On a device with an empty vault, the first sync downloads everything from MEGA (one-way), then automatically switches back to two-way sync. Runs only once per vault.", control: { type: "toggle", key: "autoBootstrapEmptyVault" } },
+          { name: "Auto bootstrap empty vault", desc: "The very first sync, when one side is empty and the other isn't, mirrors the non-empty side one-way (downloads everything from MEGA into an empty vault, or uploads everything to an empty MEGA folder) before switching to two-way sync. Runs only once per vault.", control: { type: "toggle", key: "autoBootstrapEmptyVault" } },
           { name: "Notify before sync", desc: "Show a brief on-screen notice when a sync (manual or automatic) starts.", control: { type: "toggle", key: "notifyBeforeSync" } },
           { name: "Confirm before manual sync", desc: "Show a confirmation modal before MANUAL syncs only. Automatic syncs (startup / interval / debounced) are never blocked.", control: { type: "toggle", key: "confirmManualSync" } },
           { name: "Sync on startup", desc: "Start a sync automatically when Obsidian opens. Requires unlocking the master passphrase (or no encryption).", control: { type: "toggle", key: "syncOnStartup" } },
@@ -270,6 +270,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         type: "group",
         heading: "Conflicts & deletion",
         items: [
+          { name: "Verify content hash", desc: "Compute a content hash (BLAKE3) for files up to 25MB when they're uploaded or downloaded, and use it (when available on both sides) to detect local changes instead of relying only on modification time — which the plugin cannot reliably set when writing files. Adds a small CPU cost per transfer.", control: { type: "toggle", key: "verifyContentHash" } },
           { name: "Auto-merge text conflicts", desc: "On a conflict in a .md/.markdown/.txt file (under 2MB), try a three-way merge before keeping both copies. Only applies when the two versions changed different, non-overlapping parts — genuinely overlapping edits still fall back to keeping both copies.", control: { type: "toggle", key: "autoMergeText" } },
           { name: "Conflict folder", desc: "Name of the local folder where conflict copies are stored.", control: { type: "text", key: "conflictFolder" } },
           { name: "Use trash for deletion", desc: "Move deleted local files to the system trash instead of deleting permanently.", control: { type: "toggle", key: "useTrashForDeletion" } },
@@ -300,6 +301,21 @@ export class MegaSyncSettingTab extends PluginSettingTab {
             name: "Show sync log",
             desc: "Open the recent sync log.",
             action: () => this.plugin.openLogModal(),
+          },
+          {
+            name: "Show sync report",
+            desc: "Open the persisted sync history: cumulative totals, recent runs, and recent file transfers.",
+            action: () => this.plugin.openSyncReportModal(),
+          },
+          {
+            name: "Clear sync history",
+            desc: "Forget the persisted sync report (recent runs and file transfers). Does not affect the sync snapshot.",
+            action: () => { void (async () => {
+              this.plugin.settings.syncHistory = [];
+              this.plugin.settings.recentTransfers = [];
+              await this.plugin.saveSettings();
+              new Notice("Sync history cleared.");
+            })(); },
           },
           {
             name: "Reset local snapshot",

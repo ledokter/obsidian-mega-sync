@@ -13,7 +13,9 @@ MEGA Sync keeps your Obsidian vault in sync with a folder on your MEGA.nz accoun
 - **Two-way sync** via a three-way merge (local / remote / last-sync snapshot).
 - **Sync direction**: two-way (mirror), upload-only / download-only (strict mirror), or push-only / pull-only (one-way without deletions).
 - **Triggers**: on startup, on an interval, after vault changes (debounced), manually (ribbon / command / status bar).
-- **Auto bootstrap**: on a device with an empty vault, the first sync downloads everything from MEGA (one-way), then switches back to two-way automatically.
+- **Auto bootstrap (both directions)**: the very first sync, when one side is empty and the other isn't, mirrors the non-empty side one-way — downloads everything from MEGA into an empty vault, or uploads everything from a fresh vault into an empty MEGA folder — then switches back to two-way automatically.
+- **Content-hash change detection**: files up to 25MB are hashed (BLAKE3) at transfer time; the hash (when known on both sides) takes priority over modification time to detect local changes, since the plugin cannot reliably set a file's mtime on write.
+- **Sync report**: a persisted history of recent runs and file transfers (command "Show sync report"), independent of the transient in-memory log.
 - **Mobile (experimental)**: the plugin also runs on iOS/Android — see [Mobile](#mobile-experimental).
 - **MEGA account**: email + password + optional 2FA code.
 - Configurable **remote folder** (base folder + sub-folder), auto-created.
@@ -72,6 +74,13 @@ The plugin installs and runs on Obsidian for iOS and Android. Login, folder list
 3. Run a sync: the vault is empty and MEGA has files, so this first run downloads everything one-way. When it finishes, the plugin switches to two-way sync by itself and never bootstraps again for that vault.
 
 Turn the toggle off if you prefer to control the first sync direction manually.
+
+**First sync can take a while** — a modal explains this before the very first sync starts (whichever direction it bootstraps) and links to the platform-specific steps below. Keep the app open and in the foreground until it finishes; backgrounding it, especially on iOS, can stall or interrupt the transfer.
+
+- **Android**: Settings → Apps → Obsidian → Battery → set to "Unrestricted" (disables battery optimization for the app). Alternatively, increase the screen timeout or keep the device plugged in for the duration of the sync.
+- **iOS**: Settings → Display & Brightness → Auto-Lock → Never (remember to revert this afterwards).
+
+The plugin also requests a screen wake lock automatically where the platform supports it, but this isn't guaranteed in every mobile browser context — the steps above are the reliable fallback.
 
 ## Contributions
 
