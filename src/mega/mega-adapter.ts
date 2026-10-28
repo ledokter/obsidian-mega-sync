@@ -157,6 +157,7 @@ export class MegaAdapter {
     let base = await this.findChild(root, this.opts.baseFolder);
     if (!base) {
       base = await root.mkdir(this.opts.baseFolder);
+      await root.loadAttributes();
       this.logger.info(`Created remote base folder "${this.opts.baseFolder}".`);
     }
     await this.ensureLoaded(base);
@@ -166,6 +167,7 @@ export class MegaAdapter {
       let node = await this.findChild(base, sub);
       if (!node) {
         node = await base.mkdir(sub);
+        await base.loadAttributes();
         this.logger.info(`Created remote sub-folder "${sub}".`);
       }
       await this.ensureLoaded(node);
@@ -178,7 +180,8 @@ export class MegaAdapter {
 
   /** Make sure a folder node has its children loaded. */
   private async ensureLoaded(node: MutableFile): Promise<void> {
-    if (node.children) return;
+    if (node.directory && node.children) return;
+    await node.load();
     await node.loadAttributes();
   }
 
