@@ -20,6 +20,10 @@ export interface RemoteFile {
   mtime: number; // ms
   node: MutableFile;
   isDir: boolean;
+  /** BLAKE3 content hash, captured opportunistically when this file's bytes
+   *  passed through this device (upload/download/merge). Never fetched from
+   *  MEGA on demand — MEGA does not expose a content hash. */
+  hash?: string;
 }
 
 export interface MegaAdapterOpts {

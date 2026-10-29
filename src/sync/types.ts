@@ -156,9 +156,18 @@ export interface MegaSyncSettings {
    *  network request, just stops the sync loop from waiting on it. */
   opTimeoutMinutes: number;
   /** On a text-file conflict, try a three-way merge (local/remote diverged
-   *  from a reconstructed common ancestor) before falling back to keeping
-   *  both copies. Only applies when every changed region is non-overlapping. */
+   *  from a reconstructed common ancestor) before falling back to the
+   *  conflict resolution mode below. Only applies when every changed region
+   *  is non-overlapping. */
   autoMergeText: boolean;
+  /** How a genuine content conflict (both sides modified, hashes differ) is
+   *  resolved. `keep-both` renames the remote copy to
+   *  `<name>.conflict-<ts>.<ext>` and keeps both versions (the legacy
+   *  behaviour — the source of duplicate conflict-file spam).
+   *  `prefer-local` uploads the local version over the remote,
+   *  `prefer-newest` keeps the side with the newer real mtime and overwrites
+   *  the other. Neither creates any `.conflict` files. */
+  conflictResolution: "keep-both" | "prefer-local" | "prefer-newest";
 
   /** File-type filter mode. `all` syncs every type; `whitelist` syncs only
    *  the extensions selected via the presets + custom list below. Excluded
@@ -278,6 +287,7 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   protectModifyPercentage: 50,
   opTimeoutMinutes: 10,
   autoMergeText: true,
+  conflictResolution: "prefer-newest",
   fileTypeMode: "all",
   fileTypePresetNotes: false,
   fileTypePresetImages: false,

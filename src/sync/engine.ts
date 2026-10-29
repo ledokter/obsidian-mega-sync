@@ -17,6 +17,14 @@ import { hashContent } from "./hash";
 
 const SNAPSHOT_VERSION = 1;
 const MTIME_TOLERANCE_MS = 1500;
+/** Quiet window: a sync run refuses to start while the vault has changed more
+ *  recently than this (see `run`'s `quietMs`), so sync never races against
+ *  active vault writes (Obsidian autosave). */
+const DEFAULT_QUIET_MS = 5000;
+/** Upper bound on the write-quiescence wait: a vault that keeps being edited
+ *  must not block sync indefinitely — proceed with the current state instead
+ *  and let the next run pick up the newest edits. */
+const MAX_QUIET_WAIT_MS = 30000;
 
 export class SyncEngine {
   private app: App;
@@ -27,6 +35,38 @@ export class SyncEngine {
   private progress?: (done: number, total: number, label: string) => void;
   private aborted = false;
   private mergeCache: MergeCache;
+  /** Epoch ms of the most recent local vault change reported by Obsidian
+   *  (set by main.ts on vault events). Used as an in-flight write lock: a run
+   *  waits until the vault has been quiet for `quietMs` before building
+   *  inventories, so sync never races against active autosave writes. */
+  private lastLocalChangeAt = 0;
+
+  /** Report a local vault change (wired from the vault modify/create/delete/
+   *  rename events in main.ts). */
+  noteLocalChange(): void {
+    this.lastLocalChangeAt = Date.now();
+  }
+
+  /** Seed the quiet-window baseline from the plugin's own change tracker when
+   *  an engine is built (vault events that happened before this engine existed
+   *  still count — a run started right after a burst of edits must wait). */
+  seedQuiet(ts: number): void {
+    if (ts > this.lastLocalChangeAt) this.lastLocalChangeAt = ts;
+  }
+
+  /** Wait until the vault has been quiet for `quietMs` (no vault change events
+   *  in that window), bounded by `MAX_QUIET_WAIT_MS`. Returns true when the
+   *  quiet window was satisfied, false when the bound was hit (the vault is
+   *  still being written). */
+  private async waitForQuiet(quietMs: number): Promise<boolean> {
+    const deadline = this.lastLocalChangeAt + quietMs;
+    const cap = Date.now() + MAX_QUIET_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (Date.now() >= cap) return false;
+      await new Promise<void>((r) => window.setTimeout(r, Math.min(1000, deadline - Date.now())));
+    }
+    return true;
+  }
 
   constructor(
     app: App,
@@ -56,8 +96,13 @@ export class SyncEngine {
 
   /** Run a full sync cycle. Throws on fatal errors. When `dry` is true, the
    *  plan is computed and logged but no write/delete is performed and the
-   *  snapshot is not updated. */
-  async run(dry = false): Promise<SyncResult> {
+   *  snapshot is not updated. `quietMs` is the write-quiescence window: the
+   *  run waits until the vault has been quiet for that long before building
+   *  inventories, so a sync never races against active vault writes (Obsidian
+   *  autosave). Waits are bounded by `MAX_QUIET_WAIT_MS` so a device that
+   *  keeps editing is not blocked forever — the newest state is simply picked
+   *  up by the next run. */
+  async run(dry = false, quietMs = DEFAULT_QUIET_MS): Promise<SyncResult> {
     const t0 = Date.now();
     const result: SyncResult = {
       uploaded: 0,
@@ -76,6 +121,15 @@ export class SyncEngine {
     };
 
     await this.mega.connect();
+
+    // Write-quiescence gate (see the doc comment above).
+    const quiet = await this.waitForQuiet(quietMs);
+    if (!quiet) {
+      this.logger.warn(
+        `Vault is still being written after ${MAX_QUIET_WAIT_MS / 1000}s of waiting — ` +
+          `proceeding with the current state; the latest edits will be picked up next run.`,
+      );
+    }
 
     // Build inventories.
     this.logger.info("Building local inventory…");
@@ -571,11 +625,18 @@ export class SyncEngine {
     return true;
   }
 
-  /** Conflict resolution: try an automatic text merge first (see
-   *  tryAutoMerge); otherwise keep both files. The remote copy is renamed to
-   *  a `<name>.conflict-<ts>.<ext>` file (so both versions survive on
-   *  remote), then the local version is uploaded. The local file keeps its
-   *  name. */
+  /** Conflict resolution. First compares the actual content hashes of the two
+   *  sides (see `hashCompare`): if they match, the "conflict" is a snapshot
+   *  artifact — the file is already in sync, so the snapshot metadata is
+   *  refreshed, the stale merge-cache ancestor is evicted, and nothing is
+   *  written (no conflict files). Only a genuine content difference reaches
+   *  the configured resolution mode:
+   *  - `keep-both` (legacy): rename the remote copy to
+   *    `<name>.conflict-<ts>.<ext>` and keep both versions.
+   *  - `prefer-local`: upload the local version over the remote.
+   *  - `prefer-newest`: keep the side with the newer real mtime, overwrite the
+   *    other. The two `prefer-*` modes never create conflict files.
+   *  A clean three-way text merge (see tryAutoMerge) is tried first. */
   private async resolveConflict(
     path: string,
     L: Map<string, FileEntry>,
@@ -585,20 +646,29 @@ export class SyncEngine {
     const localEntry = L.get(path);
     const remoteEntry = R.get(path);
 
-    // Fast path: same size on both sides. Overwhelmingly the common case for
-    // a backlog of historical false conflicts (both sides already hold the
-    // same content, only the snapshot lost track of it) — skip the network
-    // round-trip (download-to-compare for text, or rename-and-duplicate for
-    // everything else) entirely. Same size-as-proxy-for-equal heuristic
-    // already used in plan() for the no-snapshot case; a same-size-but-
-    // different-content collision is possible but rare, and the alternative
-    // — redownloading and/or duplicating thousands of already-identical
-    // files every run — was making syncs on large backlogs impractically
-    // slow (new local changes could never be reached before a device
-    // suspended the sync).
-    if (localEntry && remoteEntry && localEntry.size === remoteEntry.size) {
+    // Hash-first: compare the real content of both sides before doing anything
+    // destructive. Identical content means the conflict is a snapshot artifact
+    // (the snapshot lost track of a file that is already in sync) — refresh the
+    // snapshot metadata, evict any stale merge-cache ancestor, and skip. This
+    // is what stops the perpetual conflict loop: without it the same file is
+    // re-flagged every run, stacking `.conflict-<ts>` suffixes forever.
+    // The remote hash is only fetched when the sizes already match — a size
+    // mismatch is a definite content difference, so no download is needed.
+    const sizeMatch = !!localEntry && !!remoteEntry && localEntry.size === remoteEntry.size;
+    const localHash = sizeMatch ? await this.contentHash(path) : undefined;
+    const remoteHash = sizeMatch ? await this.remoteContentHash(path) : undefined;
+
+    if (localHash && remoteHash && localHash === remoteHash) {
       result.merged++;
-      this.logger.ok(`⇄ "${path}" — same size on both sides, treated as already in sync.`);
+      // Refresh both inventories' metadata so rebuildSnapshot records the file
+      // as in sync (hash + mtime), and the next run sees "unchanged".
+      L.set(path, { path, mtime: localEntry!.mtime, size: localEntry!.size, hash: localHash });
+      if (remoteEntry) R.set(path, { ...remoteEntry, hash: remoteHash });
+      const evicted = await this.mergeCache.evictIfStale(path, localHash);
+      this.logger.ok(
+        `⇄ "${path}" — content hashes match, already in sync. Snapshot metadata refreshed.` +
+          (evicted ? " Stale merge-cache ancestor evicted." : ""),
+      );
       return;
     }
 
@@ -606,10 +676,27 @@ export class SyncEngine {
       try {
         if (await this.tryAutoMerge(path, localEntry, remoteEntry, L, R, result)) return;
       } catch (e) {
-        this.logger.warn(`Auto-merge failed for "${path}", keeping both copies instead: ${String(e)}`);
+        this.logger.warn(`Auto-merge failed for "${path}", applying conflict resolution instead: ${String(e)}`);
       }
     }
 
+    const mode = this.settings.conflictResolution;
+    if (mode === "prefer-local") {
+      await this.overwriteRemoteWithLocal(path, L, R, result);
+      return;
+    }
+    if (mode === "prefer-newest") {
+      const localMtime = localEntry?.mtime ?? 0;
+      const remoteMtime = remoteEntry?.mtime ?? 0;
+      if (remoteEntry && localEntry && remoteMtime > localMtime) {
+        await this.overwriteLocalWithRemote(path, L, R, result);
+      } else {
+        await this.overwriteRemoteWithLocal(path, L, R, result);
+      }
+      return;
+    }
+
+    // keep-both (legacy): keep both copies, renaming the remote one.
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const dot = path.lastIndexOf(".");
     const base = dot > 0 ? path.slice(0, dot) : path;
@@ -671,6 +758,77 @@ export class SyncEngine {
     }
   }
 
+  /** BLAKE3 hash of a local file's content, read from disk. Forced on for
+   *  conflict resolution (conflicts are rare, so the CPU cost is worth paying
+   *  regardless of the `verifyContentHash` setting). Returns undefined for
+   *  files above the hash size cap, where hashing is skipped. */
+  private async contentHash(path: string): Promise<string | undefined> {
+    try {
+      const buf = await this.local.read(path);
+      return await hashContent(buf, true);
+    } catch (e) {
+      this.logger.warn(`Could not hash local "${path}": ${String(e)}`);
+      return undefined;
+    }
+  }
+
+  /** BLAKE3 hash of a remote file's content (requires a download). Only done
+   *  when the sizes already match — a size mismatch is a definite content
+   *  difference, so no download is needed to know the hashes differ. */
+  private async remoteContentHash(path: string): Promise<string | undefined> {
+    try {
+      const buf = await this.mega.download(path);
+      return await hashContent(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer, true);
+    } catch (e) {
+      this.logger.warn(`Could not hash remote "${path}": ${String(e)}`);
+      return undefined;
+    }
+  }
+
+  /** Upload the local version over the remote one (no conflict files). */
+  private async overwriteRemoteWithLocal(
+    path: string,
+    L: Map<string, FileEntry>,
+    R: Map<string, RemoteFile>,
+    result: SyncResult,
+  ): Promise<void> {
+    const buf = await this.local.read(path);
+    const remote = await this.mega.upload(path, Buffer.from(buf));
+    R.set(path, { ...remote, hash: await hashContent(buf, true) });
+    const prevL = L.get(path);
+    L.set(path, { path, mtime: prevL?.mtime ?? Date.now(), size: buf.byteLength, hash: R.get(path)?.hash });
+    result.uploaded++;
+    result.conflicts++;
+    result.transfers.push({ path, direction: "upload", at: Date.now() });
+    this.logger.ok(`↑ ${path} (conflict resolved: local wins)`);
+    if (isMergeableText(path, buf.byteLength)) {
+      await this.mergeCache.set(path, new TextDecoder("utf-8").decode(buf));
+    }
+  }
+
+  /** Download the remote version over the local one (no conflict files). */
+  private async overwriteLocalWithRemote(
+    path: string,
+    L: Map<string, FileEntry>,
+    R: Map<string, RemoteFile>,
+    result: SyncResult,
+  ): Promise<void> {
+    const buf = await this.mega.download(path);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    await this.local.write(path, ab);
+    const hash = await hashContent(ab, true);
+    L.set(path, { path, mtime: R.get(path)?.mtime ?? Date.now(), size: buf.length, hash });
+    if (R.get(path)) R.set(path, { ...R.get(path)!, hash });
+    result.downloaded++;
+    result.conflicts++;
+    result.transfers.push({ path, direction: "download", at: Date.now() });
+    this.logger.ok(`↓ ${path} (conflict resolved: remote wins)`);
+    if (isMergeableText(path, buf.length)) {
+      await this.mergeCache.set(path, new TextDecoder("utf-8").decode(buf));
+    }
+  }
+
+
   /** Rebuild the snapshot from the post-sync L and R maps. */
   private rebuildSnapshot(
     snapshot: SyncSnapshot,
@@ -711,6 +869,12 @@ export class SyncEngine {
   private changed(a: FileEntry, b: FileEntry): boolean {
     if (a.hash && b.hash) return a.hash !== b.hash;
     if (a.size !== b.size) return true;
+    // If one side carries a content hash (the snapshot does, once a file has
+    // gone through a hash-first sync — see resolveConflict), size equality is
+    // the strongest signal available: local mtimes cannot be set on write and
+    // MEGA timestamps never match them, so trusting mtime here re-flags the
+    // same file as "changed" every run — the perpetual conflict loop.
+    if (a.hash || b.hash) return false;
     if (Math.abs(a.mtime - b.mtime) > MTIME_TOLERANCE_MS) return true;
     return false;
   }

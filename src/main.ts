@@ -81,6 +81,11 @@ export class MegaSyncPlugin extends Plugin {
   /** Held for the duration of a first sync (see FirstSyncModal), released in
    *  startSync()'s finally block. */
   private wakeLock?: WakeLockHandle;
+  /** Epoch ms of the most recent local vault change (modify/create/delete/
+   *  rename). Passed to each SyncEngine so a run can wait for write
+   *  quiescence before building inventories — sync never races against
+   *  Obsidian's autosave. */
+  private lastLocalChangeAt = 0;
 
   async onload(): Promise<void> {
     addIcon(ICON_ID, ICON_SVG);
@@ -101,10 +106,15 @@ export class MegaSyncPlugin extends Plugin {
     this.scheduleInterval();
 
     if (this.settings.syncOnSave) {
-      this.registerEvent(this.app.vault.on("modify", () => this.scheduleDebounced()));
-      this.registerEvent(this.app.vault.on("create", () => this.scheduleDebounced()));
-      this.registerEvent(this.app.vault.on("delete", () => this.scheduleDebounced()));
-      this.registerEvent(this.app.vault.on("rename", () => this.scheduleDebounced()));
+      const note = () => {
+        this.lastLocalChangeAt = Date.now();
+        this.currentEngine?.noteLocalChange();
+        this.scheduleDebounced();
+      };
+      this.registerEvent(this.app.vault.on("modify", note));
+      this.registerEvent(this.app.vault.on("create", note));
+      this.registerEvent(this.app.vault.on("delete", note));
+      this.registerEvent(this.app.vault.on("rename", note));
     }
   }
 
@@ -405,13 +415,22 @@ export class MegaSyncPlugin extends Plugin {
   }
 
   private buildEngine(mega: MegaAdapter): SyncEngine {
-    return new SyncEngine(
+    const engine = new SyncEngine(
       this.app,
       this.settings,
       mega,
       this.logger,
       this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`,
     );
+    engine.seedQuiet(this.lastLocalChangeAt);
+    return engine;
+  }
+
+  /** Write-quiescence window passed to every run: the sync-on-save debounce
+   *  window, floored at 5s, so a run never builds inventories while Obsidian
+   *  is mid-autosave. */
+  private quietMs(): number {
+    return Math.max(5000, this.settings.syncOnSaveDebounceMs);
   }
 
   /** Confirmation modal shown before manual syncs when enabled. */
@@ -515,7 +534,7 @@ export class MegaSyncPlugin extends Plugin {
     });
 
     try {
-      const result: SyncResult = await engine.run();
+      const result: SyncResult = await engine.run(false, this.quietMs());
 
       // Cache the session so the next sync can skip the password login.
       const session = mega.getSession();
@@ -629,7 +648,7 @@ export class MegaSyncPlugin extends Plugin {
     const mega = this.buildAdapter();
     const engine = this.buildEngine(mega);
     try {
-      const result = await engine.run(true);
+      const result = await engine.run(true, this.quietMs());
       new Notice(
         `Dry run — ↑${result.uploaded} ↓${result.downloaded} ` +
           `delR:${result.deletedRemote} delL:${result.deletedLocal} ` +
