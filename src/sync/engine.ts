@@ -9,13 +9,14 @@ import { App } from "obsidian";
 import { MegaAdapter, RemoteFile } from "../mega/mega-adapter";
 import { LocalInventory } from "./local";
 import { Logger } from "../ui/logger";
-import { MegaSyncSettings, FileEntry, SyncSnapshot, SyncResult, SyncOp, FILE_TYPE_PRESETS } from "./types";
+import { MegaSyncSettings, FileEntry, SyncSnapshot, SnapshotEntry, normalizeSnapshot, SyncResult, SyncOp, FILE_TYPE_PRESETS } from "./types";
 import { PathFilter } from "./filter";
 import { attemptTextMerge, isMergeableText } from "./textMerge";
 import { MergeCache } from "./mergeCache";
 import { hashContent } from "./hash";
+import { ConflictCleanup, CleanupPlan, CleanupResult } from "./cleanup";
 
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 const MTIME_TOLERANCE_MS = 1500;
 /** Quiet window: a sync run refuses to start while the vault has changed more
  *  recently than this (see `run`'s `quietMs`), so sync never races against
@@ -158,7 +159,7 @@ export class SyncEngine {
       S = this.settings.lastSnapshot;
       this.logger.info("Using locally cached snapshot (no remote snapshot yet).");
     }
-    const snapshot: SyncSnapshot = S ?? { v: SNAPSHOT_VERSION, savedAt: 0, files: {} };
+    const snapshot: SyncSnapshot = S ? normalizeSnapshot(S) : { v: SNAPSHOT_VERSION, savedAt: 0, files: {} };
 
     // Auto-bootstrap: empty local vault + non-empty remote + no prior
     // snapshot -> force a download-only first sync so the vault is populated
@@ -274,6 +275,88 @@ export class SyncEngine {
     return result;
   }
 
+  /** Scan for conflict-copy groups without writing anything — the dry-run
+   *  preview shown by the "Clean up conflict copies" command. */
+  async scanCleanup(): Promise<CleanupPlan> {
+    await this.mega.connect();
+    const L = await this.local.build();
+    const R = await this.mega.listRemote();
+    const pathFilter = new PathFilter(this.settings);
+    this.filterByPath(L, pathFilter);
+    this.filterByPath(R, pathFilter);
+    this.filterByType(L);
+    this.filterByType(R);
+    const cleanup = new ConflictCleanup(this.app, this.settings, this.mega, this.logger, this.mergeCache, this.local);
+    return cleanup.scan(L, R);
+  }
+
+  /** Clean up conflict copies on both sides (see cleanup.ts): collapse each
+   *  `.conflict-*` group into the base file (all edits preserved when the
+   *  merges are clean, newest-wins otherwise), delete the copies locally and
+   *  on MEGA, and rewrite the snapshot. `dry` previews without writing;
+   *  `merge = false` keeps only the newest version without merging. */
+  async runCleanup(dry = false, merge = true): Promise<CleanupResult> {
+    const t0 = Date.now();
+    await this.mega.connect();
+
+    const L = await this.local.build();
+    const R = await this.mega.listRemote();
+
+    const pathFilter = new PathFilter(this.settings);
+    this.filterByPath(L, pathFilter);
+    this.filterByPath(R, pathFilter);
+    this.filterByType(L);
+    this.filterByType(R);
+
+    const cleanup = new ConflictCleanup(this.app, this.settings, this.mega, this.logger, this.mergeCache, this.local);
+    const plan = await cleanup.scan(L, R);
+    if (plan.groups.length === 0) {
+      this.logger.info("No conflict copies to clean up.");
+      return { groups: 0, merged: 0, newestWins: 0, deletedLocal: 0, deletedRemote: 0, errors: 0 };
+    }
+
+    this.guardCleanup(plan, L, R);
+
+    const result = await cleanup.apply(plan, L, R, merge, dry);
+
+    if (!dry) {
+      let S = await this.mega.readSnapshot();
+      if (!S && this.settings.lastSnapshot) S = this.settings.lastSnapshot;
+      const snapshot: SyncSnapshot = S ? normalizeSnapshot(S) : { v: SNAPSHOT_VERSION, savedAt: 0, files: {} };
+      cleanup.rebuildSnapshot(snapshot, L, R);
+      snapshot.savedAt = Date.now();
+      await this.mega.writeSnapshot(snapshot);
+      this.settings.lastSnapshot = snapshot;
+    }
+
+    this.logger.ok(
+      `Cleanup complete in ${((Date.now() - t0) / 1000).toFixed(1)}s — ` +
+        `${result.groups} group(s), merged:${result.merged}, newest:${result.newestWins}, ` +
+        `delL:${result.deletedLocal}, delR:${result.deletedRemote}, errors:${result.errors}`,
+    );
+    return result;
+  }
+
+  /** Safety guard for cleanup: collapsing conflict copies deletes many files
+   *  at once, so the same `protectModifyPercentage` threshold as sync applies.
+   *  `100` disables the guard. */
+  private guardCleanup(plan: CleanupPlan, L: Map<string, FileEntry>, R: Map<string, RemoteFile>): void {
+    const pct = this.settings.protectModifyPercentage;
+    if (pct >= 100) return;
+    const allFiles = new Set<string>([...L.keys(), ...R.keys()]);
+    const total = allFiles.size;
+    if (total === 0) return;
+    const modifyDelete = plan.copiesToDelete + plan.groups.length;
+    const ratio = (modifyDelete * 100) / total;
+    if (ratio >= pct) {
+      const msg =
+        `Aborted cleanup: ${modifyDelete}/${total} files (${ratio.toFixed(0)}%) would change, ` +
+        `exceeding the ${pct}% safety guard. Raise "Max % of files changed per sync" in settings to proceed.`;
+      this.logger.error(msg);
+      throw new Error(msg);
+    }
+  }
+
   /** Abort the sync if the share of modifying/deleting ops exceeds the
    *  configured percentage. Protects against mass deletions when one side
    *  appears empty (wrong vault, lost snapshot, …). `100` disables the guard;
@@ -305,7 +388,7 @@ export class SyncEngine {
   private plan(
     L: Map<string, FileEntry>,
     R: Map<string, RemoteFile>,
-    S: Record<string, FileEntry>,
+    S: Record<string, SnapshotEntry>,
     dir: MegaSyncSettings["syncDirection"],
   ): SyncOp[] {
     const ops: SyncOp[] = [];
@@ -347,8 +430,8 @@ export class SyncEngine {
         continue;
       }
 
-      const lChanged = l && s && this.changed(l, s);
-      const rChanged = r && s && this.changed({ path, mtime: r.mtime, size: r.size }, s);
+      const lChanged = l && s && this.localChanged(l, s);
+      const rChanged = r && s && this.remoteChanged(r, s);
 
       // Deletions.
       if (lGone && r && !rChanged) {
@@ -505,7 +588,7 @@ export class SyncEngine {
     op: SyncOp,
     L: Map<string, FileEntry>,
     R: Map<string, RemoteFile>,
-    S: Record<string, FileEntry>,
+    S: Record<string, SnapshotEntry>,
     result: SyncResult,
   ): Promise<void> {
     const path = op.path;
@@ -528,11 +611,11 @@ export class SyncEngine {
       case "download": {
         const buf = await this.mega.download(path);
         const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-        await this.local.write(path, ab);
+        const realMtime = await this.local.write(path, ab);
         const hash = await hashContent(ab, this.settings.verifyContentHash);
         L.set(path, {
           path,
-          mtime: R.get(path)?.mtime ?? Date.now(),
+          mtime: realMtime,
           size: buf.length,
           hash,
         });
@@ -612,11 +695,10 @@ export class SyncEngine {
 
     const encoded = new TextEncoder().encode(merged);
     const ab = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength);
-    const now = Date.now();
-    await this.local.write(path, ab, now);
+    const realMtime = await this.local.write(path, ab);
     const remoteEntry = await this.mega.upload(path, Buffer.from(encoded));
     const hash = await hashContent(ab, this.settings.verifyContentHash);
-    L.set(path, { path, mtime: now, size: encoded.length, hash });
+    L.set(path, { path, mtime: realMtime, size: encoded.length, hash });
     R.set(path, remoteEntry);
     result.merged++;
     result.transfers.push({ path, direction: "upload", at: Date.now() });
@@ -696,29 +778,40 @@ export class SyncEngine {
       return;
     }
 
-    // keep-both (legacy): keep both copies, renaming the remote one.
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    // keep-both (legacy): keep both copies, renaming the remote one. The
+    // conflict name is derived from the remote content hash, not the wall
+    // clock, so the same conflict maps to the same name every run — renaming
+    // an already-renamed file is a no-op and the copies never stack up.
+    const remoteHashForName = remoteHash ?? await this.remoteContentHash(path);
     const dot = path.lastIndexOf(".");
     const base = dot > 0 ? path.slice(0, dot) : path;
     const ext = dot > 0 ? path.slice(dot) : "";
-    const conflictName = `${base}.conflict-${ts}${ext}`;
+    const tag = remoteHashForName ? remoteHashForName.slice(0, 12) : new Date().toISOString().replace(/[:.]/g, "-");
+    const conflictName = `${base}.conflict-${tag}${ext}`;
 
     const remote = R.get(path);
     if (remote) {
-      try {
-        const newName = conflictName.split("/").pop();
-        if (newName) await this.mega.rename(path, newName);
-        R.delete(path);
-        // Register the renamed file under its new path so the snapshot
-        // rebuilt at the end of this run knows it exists on both sides —
-        // otherwise the next sync sees an "unknown" remote file at this path
-        // and re-flags it as a fresh conflict, stacking suffixes forever.
-        R.set(conflictName, { ...remote, path: conflictName });
-        result.conflicts++;
-        this.logger.warn(`Conflict on "${path}" — kept remote copy as "${conflictName}".`);
-      } catch (e) {
-        this.logger.error(`Could not rename conflicting remote "${path}".`, e);
-        result.errors++;
+      if (R.has(conflictName)) {
+        // The conflict copy already exists (same remote content, same hash →
+        // same name). Idempotent: nothing to rename, just keep the snapshot
+        // consistent so the next run sees the base file in sync.
+        this.logger.info(`Conflict copy "${conflictName}" already exists — no new copy created.`);
+      } else {
+        try {
+          const newName = conflictName.split("/").pop();
+          if (newName) await this.mega.rename(path, newName);
+          R.delete(path);
+          // Register the renamed file under its new path so the snapshot
+          // rebuilt at the end of this run knows it exists on both sides —
+          // otherwise the next sync sees an "unknown" remote file at this path
+          // and re-flags it as a fresh conflict, stacking suffixes forever.
+          R.set(conflictName, { ...remote, path: conflictName });
+          result.conflicts++;
+          this.logger.warn(`Conflict on "${path}" — kept remote copy as "${conflictName}".`);
+        } catch (e) {
+          this.logger.error(`Could not rename conflicting remote "${path}".`, e);
+          result.errors++;
+        }
       }
     }
 
@@ -726,13 +819,17 @@ export class SyncEngine {
     // versions survive on the local side too.
     const local = L.get(path);
     if (local) {
-      try {
-        await this.local.renameLocal(path, conflictName);
-        // Re-read the renamed file into inventory so it gets uploaded too.
-        L.delete(path);
-        L.set(conflictName, { path: conflictName, mtime: local.mtime, size: local.size });
-      } catch (e) {
-        this.logger.error(`Could not create local conflict copy for "${path}".`, e);
+      if (L.has(conflictName)) {
+        this.logger.info(`Local conflict copy "${conflictName}" already exists — no new copy created.`);
+      } else {
+        try {
+          await this.local.renameLocal(path, conflictName);
+          // Re-read the renamed file into inventory so it gets uploaded too.
+          L.delete(path);
+          L.set(conflictName, { path: conflictName, mtime: local.mtime, size: local.size });
+        } catch (e) {
+          this.logger.error(`Could not create local conflict copy for "${path}".`, e);
+        }
       }
     }
 
@@ -815,9 +912,9 @@ export class SyncEngine {
   ): Promise<void> {
     const buf = await this.mega.download(path);
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-    await this.local.write(path, ab);
+    const realMtime = await this.local.write(path, ab);
     const hash = await hashContent(ab, true);
-    L.set(path, { path, mtime: R.get(path)?.mtime ?? Date.now(), size: buf.length, hash });
+    L.set(path, { path, mtime: realMtime, size: buf.length, hash });
     if (R.get(path)) R.set(path, { ...R.get(path)!, hash });
     result.downloaded++;
     result.conflicts++;
@@ -829,53 +926,66 @@ export class SyncEngine {
   }
 
 
-  /** Rebuild the snapshot from the post-sync L and R maps. */
+  /** Rebuild the snapshot from the post-sync L and R maps, recording each
+   *  side's OWN timestamp. This is what breaks the perpetual conflict loop:
+   *  the next run compares local mtime against `localMtime` and MEGA mtime
+   *  against `remoteMtime`, so a file that was just synced is recognized as
+   *  unchanged on both sides even though the two timestamps differ. */
   private rebuildSnapshot(
     snapshot: SyncSnapshot,
     L: Map<string, FileEntry>,
     R: Map<string, RemoteFile>,
   ): void {
-    const files: Record<string, FileEntry> = {};
+    const files: Record<string, SnapshotEntry> = {};
     for (const [path, l] of L) {
       const r = R.get(path);
-      // Prefer the local mtime (authoritative for local edits); keep size from
-      // whichever side matches. The hash (when known) always comes from L —
-      // it's only ever captured at transfer time, on the buffer that just
-      // passed through this device (see execute()).
+      // The hash (when known) always comes from L — it's only ever captured at
+      // transfer time, on the buffer that just passed through this device
+      // (see execute()).
       files[path] = {
         path,
-        mtime: l.mtime,
         size: r ? r.size : l.size,
         hash: l.hash,
+        localMtime: l.mtime,
+        remoteMtime: r ? r.mtime : 0,
       };
     }
     // Any remote file not present locally (e.g. conflict copies we just
     // created) should also be recorded.
     for (const [path, r] of R) {
       if (!files[path]) {
-        files[path] = { path, mtime: r.mtime, size: r.size };
+        files[path] = { path, size: r.size, hash: r.hash, localMtime: 0, remoteMtime: r.mtime };
       }
     }
     snapshot.files = files;
   }
 
-  /** Has an entry changed relative to the snapshot? When both sides carry a
-   *  content hash (captured at a previous transfer — see execute()), it is
-   *  authoritative and decides the comparison outright: it's the only signal
-   *  immune to local mtimes not being settable on write (see
-   *  LocalInventory.write). Otherwise falls back to size+mtime. Remote
-   *  entries never carry a hash of their own (comparing would require a
-   *  re-download), so this mainly hardens the local-side comparison. */
-  private changed(a: FileEntry, b: FileEntry): boolean {
-    if (a.hash && b.hash) return a.hash !== b.hash;
-    if (a.size !== b.size) return true;
-    // If one side carries a content hash (the snapshot does, once a file has
-    // gone through a hash-first sync — see resolveConflict), size equality is
-    // the strongest signal available: local mtimes cannot be set on write and
-    // MEGA timestamps never match them, so trusting mtime here re-flags the
-    // same file as "changed" every run — the perpetual conflict loop.
-    if (a.hash || b.hash) return false;
-    if (Math.abs(a.mtime - b.mtime) > MTIME_TOLERANCE_MS) return true;
-    return false;
+  /** Has the LOCAL side changed relative to the state it was last synced to?
+   *  Compares against `s.localMtime` (the local mtime observed right after the
+   *  last sync), never against the remote timestamp — a MEGA mtime (upload
+   *  time) can never equal an Obsidian write time, and the old single-mtime
+   *  snapshot mixed the two, re-flagging every file as changed on every run.
+   *  A content hash, when both sides carry one, is authoritative. */
+  private localChanged(l: FileEntry, s: SnapshotEntry): boolean {
+    if (s.localMtime === 0) return true; // not present locally at last sync
+    if (l.hash && s.hash) return l.hash !== s.hash;
+    if (l.size !== s.size) return true;
+    // A hash on either side makes size equality the strongest signal: local
+    // mtimes cannot be set on write, so trusting them here re-flags the same
+    // file as "changed" every run (the perpetual conflict loop).
+    if (l.hash || s.hash) return false;
+    return Math.abs(l.mtime - s.localMtime) > MTIME_TOLERANCE_MS;
+  }
+
+  /** Has the REMOTE side changed relative to the state it was last synced to?
+   *  Compares against `s.remoteMtime` (the MEGA timestamp observed right after
+   *  the last sync). MEGA mtimes are stable between syncs, so this is a
+   *  reliable signal — the old cross-side comparison was not. */
+  private remoteChanged(r: RemoteFile, s: SnapshotEntry): boolean {
+    if (s.remoteMtime === 0) return true; // not present remotely at last sync
+    if (r.hash && s.hash) return r.hash !== s.hash;
+    if (r.size !== s.size) return true;
+    if (r.hash || s.hash) return false;
+    return Math.abs(r.mtime - s.remoteMtime) > MTIME_TOLERANCE_MS;
   }
 }

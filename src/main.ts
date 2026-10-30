@@ -23,6 +23,7 @@ import { formatDuration } from "./util";
 import { requestWakeLock, WakeLockHandle } from "./ui/wakeLock";
 import { FirstSyncModal } from "./ui/firstSyncModal";
 import { SyncReportModal } from "./ui/reportModal";
+import { CleanupPlan } from "./sync/cleanup";
 
 const ICON_ID = "mega-sync-icon";
 const ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
@@ -331,6 +332,11 @@ export class MegaSyncPlugin extends Plugin {
       id: "test-connection",
       name: "Test MEGA connection & read/write",
       callback: () => this.testConnection(),
+    });
+    this.addCommand({
+      id: "clean-conflicts",
+      name: "Clean up conflict copies",
+      callback: () => this.cleanConflicts().catch(() => {}),
     });
     this.addCommand({
       id: "lock",
@@ -661,6 +667,101 @@ export class MegaSyncPlugin extends Plugin {
     } finally {
       await mega.close();
     }
+  }
+
+  /** Clean up the `.conflict-*` copies stacked up by the keep-both conflict
+   *  mode. Shows a dry-run preview (groups + copies on local and MEGA), then
+   *  collapses each group into the base file (all edits preserved when the
+   *  merges are clean, newest-wins otherwise) and deletes the copies on both
+   *  sides. */
+  async cleanConflicts(): Promise<void> {
+    if (this.isLocked()) {
+      new Notice("Unlock MEGA Sync (settings → master passphrase) first.");
+      return;
+    }
+    if (!this.secrets || (!this.secrets.email && !this.secrets.session?.sid)) {
+      new Notice("Set your MEGA credentials first.");
+      return;
+    }
+    if (!this.isOnline()) {
+      new Notice("Offline — cannot scan MEGA for conflict copies.");
+      return;
+    }
+
+    const mega = this.buildAdapter();
+    const engine = this.buildEngine(mega);
+    try {
+      const plan = await engine.scanCleanup();
+      if (plan.groups.length === 0) {
+        new Notice("No conflict copies to clean up.");
+        return;
+      }
+      const merge = await this.confirmCleanup(plan);
+      if (merge === null) {
+        this.logger.info("Cleanup cancelled by user.");
+        return;
+      }
+      const result = await engine.runCleanup(false, merge);
+      const session = mega.getSession();
+      if (session && session.sid && session.key && this.secrets) {
+        this.secrets.session = session;
+        await this.persistSecrets();
+      }
+      new Notice(
+        `Cleanup done — ${result.groups} group(s), merged:${result.merged}, newest:${result.newestWins}, ` +
+          `delL:${result.deletedLocal}, delR:${result.deletedRemote}, errors:${result.errors}`,
+        8000,
+      );
+    } catch (e) {
+      this.logger.error("Cleanup failed.", e);
+      new Notice(`Cleanup failed: ${e instanceof Error ? e.message : String(e)}`, 10000);
+    } finally {
+      await mega.close();
+    }
+  }
+
+  /** Preview modal for the cleanup: lists each conflict group, lets the user
+   *  choose merge (preserve all edits) vs. newest-only, and confirms. Resolves
+   *  to true (merge), false (newest-only), or null (cancelled). */
+  private confirmCleanup(plan: CleanupPlan): Promise<boolean | null> {
+    return new Promise((resolve) => {
+      const modal = new Modal(this.app);
+      modal.titleEl.setText("Clean up conflict copies?");
+      const body = modal.contentEl.createDiv();
+      body.createEl("p", {
+        text: `${plan.groups} file(s) have conflict copies. Each group collapses into one base file; `
+          + `${plan.copiesToDelete} copies will be deleted on the local vault and on MEGA.`,
+      });
+      body.createEl("p", {
+        cls: "mega-text-muted",
+        text: `${plan.mergeable} group(s) are text files that can be merged (all edits preserved); `
+          + "binary files keep the newest version.",
+      });
+
+      const list = body.createDiv({ cls: "mega-sync-report-list" });
+      for (const g of plan.groups.slice(0, 40)) {
+        list.createDiv({ cls: "mega-sync-report-row", text: `${g.base} — ${g.versions.length} versions` });
+      }
+      if (plan.groups.length > 40) {
+        list.createDiv({ cls: "mega-text-muted", text: `…and ${plan.groups.length - 40} more.` });
+      }
+
+      let merge = true;
+      const mergeRow = body.createDiv({ cls: "mega-mt-10" });
+      const mergeSel = mergeRow.createEl("select");
+      mergeSel.createEl("option", { text: "Merge — preserve all edits", attr: { value: "merge" } });
+      mergeSel.createEl("option", { text: "Keep newest only — no merge", attr: { value: "newest" } });
+      mergeSel.onchange = () => { merge = mergeSel.value === "merge"; };
+
+      const btnRow = modal.contentEl.createDiv({ cls: "mega-text-right mega-mt-10" });
+      const cancel = btnRow.createEl("button", { text: "Cancel" });
+      const ok = btnRow.createEl("button", { text: "Clean up" });
+      ok.classList.add("mod-cta");
+      ok.onclick = () => { modal.close(); resolve(merge); };
+      cancel.onclick = () => { modal.close(); resolve(null); };
+      modal.onClose = () => resolve(null);
+      modal.open();
+    });
   }
 
   /** Connect to MEGA, then write a small test file, read it back, verify the

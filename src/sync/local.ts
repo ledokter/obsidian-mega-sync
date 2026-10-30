@@ -1,9 +1,17 @@
 // Local vault inventory: walk the vault, apply include/exclude rules, and
-// produce a flat map of vault-relative path -> FileEntry (mtime, size).
+// produce a flat map of vault-relative path -> FileEntry (mtime, size, hash).
 import { App, TFile, TFolder, TAbstractFile, Vault } from "obsidian";
 import { MegaSyncSettings, FileEntry } from "./types";
 import { matchesAnyPattern, normalizePath } from "../util";
 import { PathFilter } from "./filter";
+import { hashContent } from "./hash";
+
+/** Extensions hashed during the inventory walk. These are the files Obsidian
+ *  rewrites on autosave, which is what makes mtime untrustworthy on the local
+ *  side; hashing them is the only reliable change signal. Binary files (images
+ *  etc.) are not re-written by the editor, so they keep the cheap mtime+size
+ *  heuristic and avoid the I/O cost of hashing large media on every run. */
+const INVENTORY_HASH_EXT = new Set(["md", "markdown", "txt", "canvas", "json"]);
 
 export class LocalInventory {
   private pathFilter!: PathFilter;
@@ -57,6 +65,7 @@ export class LocalInventory {
           path: rel,
           mtime: child.stat.mtime,
           size: child.stat.size,
+          hash: await this.hashFor(rel, child.stat.size),
         });
       } else if (child instanceof TFolder) {
         // Config folder policy: sync everything, sync bookmarks only, or skip.
@@ -102,21 +111,47 @@ export class LocalInventory {
     return size > max * 1024 * 1024;
   }
 
+  /** BLAKE3 hash for a file collected during the inventory walk, when it is a
+   *  type Obsidian rewrites on autosave (md/txt/canvas/json) and hashing is
+   *  enabled. Returns undefined for everything else, so the walk stays cheap
+   *  for large binary media. */
+  private async hashFor(path: string, size: number): Promise<string | undefined> {
+    if (!this.settings.verifyContentHash) return undefined;
+    const dot = path.lastIndexOf(".");
+    if (dot < 0) return undefined;
+    if (!INVENTORY_HASH_EXT.has(path.slice(dot + 1).toLowerCase())) return undefined;
+    try {
+      const buf = await this.app.vault.adapter.readBinary(path);
+      return await hashContent(buf, true);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Read the raw bytes of a local file. */
   async read(path: string): Promise<ArrayBuffer> {
     return this.app.vault.adapter.readBinary(path);
   }
 
-  /** Write bytes to a local file, creating folders as needed. */
-  async write(path: string, data: ArrayBuffer, mtime?: number): Promise<void> {
+  /** Write bytes to a local file, creating folders as needed. Returns the REAL
+   *  local mtime after the write (re-stat), which is what must be recorded in
+   *  the snapshot: Obsidian doesn't expose a portable mtime setter, so the
+   *  `mtime` argument is only a hint — the actual on-disk timestamp is the
+   *  authoritative local baseline for the next run's `localChanged()` check. */
+  async write(path: string, data: ArrayBuffer, mtime?: number): Promise<number> {
     const parent = path.split("/").slice(0, -1).join("/");
     if (parent && !(await this.app.vault.adapter.exists(parent))) {
       await this.app.vault.adapter.mkdir(parent);
     }
     await this.app.vault.adapter.writeBinary(path, data);
-    // Obsidian doesn't expose a portable mtime setter; we rely on the
-    // snapshot to track the canonical mtime across devices.
     void mtime;
+    try {
+      const stat = await this.app.vault.adapter.stat(path);
+      if (stat && stat.type === "file") return stat.mtime;
+    } catch {
+      // stat unsupported on this adapter — fall back to the write time.
+    }
+    return Date.now();
   }
 
   /** Delete a local file, optionally via the trash. */
