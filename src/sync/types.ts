@@ -17,6 +17,29 @@ export interface FileEntry {
   hash?: string;
 }
 
+/** A snapshot entry: the state of a path right after the last successful
+ *  sync, recorded PER SIDE. The old single-`mtime` format was the root of the
+ *  perpetual conflict loop: an Obsidian local mtime (write time) and a MEGA
+ *  mtime (upload time) never match each other, so comparing one side against
+ *  the other side's timestamp re-flags the same file as "changed" every run
+ *  (download → upload → download → …, stacking `.conflict-<ts>` copies).
+ *  v2 stores each side's own timestamp, so a side is only considered changed
+ *  when it differs from the state that side was last synced to. */
+export interface SnapshotEntry {
+  path: string;
+  /** Size in bytes at last sync (both sides matched). */
+  size: number;
+  /** BLAKE3 content hash at last sync, when captured. Authoritative over
+   *  mtime when present. */
+  hash?: string;
+  /** Local mtime as observed right after the last sync (0 = not present
+   *  locally at last sync). */
+  localMtime: number;
+  /** MEGA mtime as observed right after the last sync (0 = not present
+   *  remotely at last sync). */
+  remoteMtime: number;
+}
+
 /**
  * The persisted snapshot of the last successful sync.
  * Maps vault-relative path -> the state as it was right after the last sync.
@@ -30,7 +53,26 @@ export interface SyncSnapshot {
   /** Epoch milliseconds when the snapshot was written. */
   savedAt: number;
   /** Map of path -> entry as it was at last sync. */
-  files: Record<string, FileEntry>;
+  files: Record<string, SnapshotEntry>;
+}
+
+/** Migrate a snapshot loaded from disk (v1: single `mtime`, no per-side state)
+ *  to the v2 per-side format. v1 `mtime` becomes both sides' baseline, which
+ *  is the best guess available; the content hash (if any) is kept and remains
+ *  authoritative. Entries already in v2 form pass through unchanged. */
+export function normalizeSnapshot(s: SyncSnapshot): SyncSnapshot {
+  const files: Record<string, SnapshotEntry> = {};
+  for (const [path, e] of Object.entries(s.files)) {
+    const raw = e as unknown as SnapshotEntry & { mtime?: number };
+    files[path] = {
+      path,
+      size: raw.size,
+      hash: raw.hash,
+      localMtime: raw.localMtime ?? raw.mtime ?? 0,
+      remoteMtime: raw.remoteMtime ?? raw.mtime ?? 0,
+    };
+  }
+  return { v: 2, savedAt: s.savedAt, files };
 }
 
 /** Operations the sync engine decides to perform. */
@@ -156,9 +198,18 @@ export interface MegaSyncSettings {
    *  network request, just stops the sync loop from waiting on it. */
   opTimeoutMinutes: number;
   /** On a text-file conflict, try a three-way merge (local/remote diverged
-   *  from a reconstructed common ancestor) before falling back to keeping
-   *  both copies. Only applies when every changed region is non-overlapping. */
+   *  from a reconstructed common ancestor) before falling back to the
+   *  conflict resolution mode below. Only applies when every changed region
+   *  is non-overlapping. */
   autoMergeText: boolean;
+  /** How a genuine content conflict (both sides modified, hashes differ) is
+   *  resolved. `keep-both` renames the remote copy to
+   *  `<name>.conflict-<ts>.<ext>` and keeps both versions (the legacy
+   *  behaviour — the source of duplicate conflict-file spam).
+   *  `prefer-local` uploads the local version over the remote,
+   *  `prefer-newest` keeps the side with the newer real mtime and overwrites
+   *  the other. Neither creates any `.conflict` files. */
+  conflictResolution: "keep-both" | "prefer-local" | "prefer-newest";
 
   /** File-type filter mode. `all` syncs every type; `whitelist` syncs only
    *  the extensions selected via the presets + custom list below. Excluded
@@ -278,6 +329,7 @@ export const DEFAULT_SETTINGS: MegaSyncSettings = {
   protectModifyPercentage: 50,
   opTimeoutMinutes: 10,
   autoMergeText: true,
+  conflictResolution: "prefer-newest",
   fileTypeMode: "all",
   fileTypePresetNotes: false,
   fileTypePresetImages: false,

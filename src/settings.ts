@@ -271,7 +271,21 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         heading: "Conflicts & deletion",
         items: [
           { name: "Verify content hash", desc: "Compute a content hash (BLAKE3) for files up to 25MB when they're uploaded or downloaded, and use it (when available on both sides) to detect local changes instead of relying only on modification time — which the plugin cannot reliably set when writing files. Adds a small CPU cost per transfer.", control: { type: "toggle", key: "verifyContentHash" } },
-          { name: "Auto-merge text conflicts", desc: "On a conflict in a .md/.markdown/.txt file (under 2MB), try a three-way merge before keeping both copies. Only applies when the two versions changed different, non-overlapping parts — genuinely overlapping edits still fall back to keeping both copies.", control: { type: "toggle", key: "autoMergeText" } },
+          {
+            name: "Conflict resolution",
+            desc: "How a genuine content conflict (both sides modified, content differs) is resolved. Keep both renames the remote copy to a `.conflict-<timestamp>` file and keeps both versions — this is the source of duplicate conflict-file spam. Prefer local / prefer newest overwrite the losing side and never create any `.conflict` files. A clean three-way text merge is always tried first. Identical content is treated as already in sync (no conflict file, snapshot refreshed).",
+            aliases: ["conflict", "keep both", "prefer", "duplicate"],
+            control: {
+              type: "dropdown",
+              key: "conflictResolution",
+              options: {
+                "keep-both": "Keep both copies (creates .conflict files)",
+                "prefer-local": "Prefer local (overwrite remote, no .conflict files)",
+                "prefer-newest": "Prefer newest (newer mtime wins, no .conflict files)",
+              },
+            },
+          },
+          { name: "Auto-merge text conflicts", desc: "On a conflict in a .md/.markdown/.txt file (under 2MB), try a three-way merge before applying the conflict resolution mode above. Only applies when the two versions changed different, non-overlapping parts — genuinely overlapping edits fall back to the resolution mode.", control: { type: "toggle", key: "autoMergeText" } },
           { name: "Conflict folder", desc: "Name of the local folder where conflict copies are stored.", control: { type: "text", key: "conflictFolder" } },
           { name: "Use trash for deletion", desc: "Move deleted local files to the system trash instead of deleting permanently.", control: { type: "toggle", key: "useTrashForDeletion" } },
           { name: "Max % of files changed per sync", desc: "Abort the sync if more than this % of all files would be modified or deleted in a single run. Safety guard against mass deletions (e.g. a wrongly-empty vault). 0 = always block, 100 = disabled.", control: { type: "number", key: "protectModifyPercentage" } },

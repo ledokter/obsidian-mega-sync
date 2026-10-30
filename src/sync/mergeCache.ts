@@ -12,6 +12,7 @@
 // bulk backfill, which would mean re-reading every note in the vault on the
 // first sync after upgrading).
 import { App } from "obsidian";
+import { hashContent } from "./hash";
 
 export class MergeCache {
   private app: App;
@@ -65,5 +66,21 @@ export class MergeCache {
     } catch {
       /* best-effort */
     }
+  }
+
+  /** Evict the cached ancestor when it no longer matches the content that is
+   *  currently in sync on both sides (`currentHash`). A stale ancestor is the
+   *  root of perpetual conflict loops: diff3 keeps reporting a conflict
+   *  against an ancestor that no longer exists, so every run re-flags the same
+   *  file. Returns true if the entry was dropped. */
+  async evictIfStale(relPath: string, currentHash: string): Promise<boolean> {
+    const cached = await this.get(relPath);
+    if (cached === null) return false;
+    const bytes = new TextEncoder().encode(cached);
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const hash = await hashContent(ab, true);
+    if (hash && hash === currentHash) return false;
+    await this.remove(relPath);
+    return true;
   }
 }
