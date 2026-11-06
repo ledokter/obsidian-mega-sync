@@ -392,6 +392,7 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         i2.addClass("mega-input-full");
         i2.addClass("mega-mt-6");
       }
+      let settled = false;
       const btnRow = modal.contentEl.createDiv({ cls: "mega-mt-14 mega-text-right" });
       const cancel = btnRow.createEl("button", { text: "Cancel" });
       const ok = btnRow.createEl("button", { text: "OK" });
@@ -401,12 +402,12 @@ export class MegaSyncSettingTab extends PluginSettingTab {
         if (!v) { new Notice("Passphrase cannot be empty."); return; }
         if (i2 && i2.value !== v) { new Notice("Passphrases do not match."); return; }
         i1.value = ""; if (i2) i2.value = "";
-        modal.close(); resolve(v);
+        settled = true; resolve(v); modal.close();
       };
       ok.onclick = submit;
       i1.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
-      cancel.onclick = () => { modal.close(); resolve(null); };
-      modal.onClose = () => resolve(null);
+      cancel.onclick = () => { settled = true; resolve(null); modal.close(); };
+      modal.onClose = () => { if (!settled) resolve(null); };
       modal.open();
     });
   }

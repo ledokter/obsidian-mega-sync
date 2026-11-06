@@ -452,13 +452,14 @@ export class MegaSyncPlugin extends Plugin {
         text: "This may upload, download, and delete files. You can review the result in the sync log afterwards.",
         cls: "mega-text-muted",
       });
+      let settled = false;
       const btnRow = modal.contentEl.createDiv({ cls: "mega-text-right mega-mt-10" });
       const cancel = btnRow.createEl("button", { text: "Cancel" });
       const ok = btnRow.createEl("button", { text: "Sync" });
       ok.classList.add("mod-cta");
-      ok.onclick = () => { modal.close(); resolve(true); };
-      cancel.onclick = () => { modal.close(); resolve(false); };
-      modal.onClose = () => resolve(false);
+      ok.onclick = () => { settled = true; resolve(true); modal.close(); };
+      cancel.onclick = () => { settled = true; resolve(false); modal.close(); };
+      modal.onClose = () => { if (!settled) resolve(false); };
       modal.open();
     });
   }
@@ -753,13 +754,14 @@ export class MegaSyncPlugin extends Plugin {
       mergeSel.createEl("option", { text: "Keep newest only — no merge", attr: { value: "newest" } });
       mergeSel.onchange = () => { merge = mergeSel.value === "merge"; };
 
+      let settled = false;
       const btnRow = modal.contentEl.createDiv({ cls: "mega-text-right mega-mt-10" });
       const cancel = btnRow.createEl("button", { text: "Cancel" });
       const ok = btnRow.createEl("button", { text: "Clean up" });
       ok.classList.add("mod-cta");
-      ok.onclick = () => { modal.close(); resolve(merge); };
-      cancel.onclick = () => { modal.close(); resolve(null); };
-      modal.onClose = () => resolve(null);
+      ok.onclick = () => { settled = true; resolve(merge); modal.close(); };
+      cancel.onclick = () => { settled = true; resolve(null); modal.close(); };
+      modal.onClose = () => { if (!settled) resolve(null); };
       modal.open();
     });
   }
